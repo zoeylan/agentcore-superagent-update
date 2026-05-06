@@ -10,12 +10,14 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Users, Plus, Send, Bot, User, X, HelpCircle } from 'lucide-react';
+import { Users, Plus, Send, Bot, User, X, HelpCircle, FolderTree } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChatRoom } from '@/services/useChatRoom';
+import { restClient } from '@/services/api/restClient';
 import type { RoomMember, RoomMessage, RouteDecision } from '@/services/api/restChatRoomService';
 import { useTranslation } from '@/i18n';
+import { WorkspaceExplorer } from './WorkspaceExplorer';
 
 const CONFIDENCE_THRESHOLD = 0.5;
 
@@ -26,7 +28,7 @@ interface ChatRoomProps {
 export function ChatRoom({ roomId }: ChatRoomProps) {
   const {
     room, members, messages, isLoading, error, isSending,
-    sendMessage, removeMember, suggestAgent, confirmCreateAgent,
+    sendMessage, addMember, removeMember, suggestAgent, confirmCreateAgent,
   } = useChatRoom({ roomId, pollInterval: 3000 });
   const { t } = useTranslation();
 
@@ -34,7 +36,12 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   const [mentionAgentId, setMentionAgentId] = useState<string | null>(null);
   const [showMentionPicker, setShowMentionPicker] = useState(false);
   const [showMemberPanel, setShowMemberPanel] = useState(false);
+  const [showWorkspacePanel, setShowWorkspacePanel] = useState(false);
+  const [workspaceWidth, setWorkspaceWidth] = useState(280);
   const [showAgentCreator, setShowAgentCreator] = useState(false);
+  const [showAgentPicker, setShowAgentPicker] = useState(false);
+  const [orgAgents, setOrgAgents] = useState<Array<{ id: string; name: string; display_name: string; role: string | null; avatar: string | null; business_scope_id: string | null }>>([]);
+  const [scopeNameMap, setScopeNameMap] = useState<Record<string, string>>({});
   const [agentDescription, setAgentDescription] = useState('');
   const [suggestedAgent, setSuggestedAgent] = useState<Record<string, unknown> | null>(null);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
@@ -43,9 +50,40 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+
+  // Only auto-scroll if user is already near the bottom (within 150px)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const { scrollTop, scrollHeight, clientHeight } = container;
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
+    if (isNearBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
+
+  // Load org agents when picker opens
+  useEffect(() => {
+    if (!showAgentPicker) return;
+    Promise.all([
+      restClient.get<{ data: Array<{ id: string; name: string; display_name: string; role: string | null; avatar: string | null; business_scope_id: string | null }> }>('/api/agents?limit=100'),
+      restClient.get<{ data: Array<{ id: string; name: string }> }>('/api/business-scopes'),
+    ]).then(([agentRes, scopeRes]) => {
+      setOrgAgents(agentRes.data ?? []);
+      const map: Record<string, string> = {};
+      for (const s of (scopeRes.data ?? [])) map[s.id] = s.name;
+      setScopeNameMap(map);
+    }).catch(() => setOrgAgents([]));
+  }, [showAgentPicker]);
+
+  const memberAgentIds = new Set(members.map(m => m.agent_id));
+  const availableAgents = orgAgents.filter(a => !memberAgentIds.has(a.id));
+
+  const handleAddExistingAgent = useCallback(async (agentId: string) => {
+    await addMember(agentId);
+    setShowAgentPicker(false);
+  }, [addMember]);
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || isSending) return;
@@ -136,13 +174,25 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
         <h2 className="text-sm font-semibold text-white">{room?.title ?? t('chatRoom.groupChat')}</h2>
-        <button
-          onClick={() => setShowMemberPanel(!showMemberPanel)}
-          className="flex items-center gap-1.5 px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors"
-        >
-          <Users size={14} />
-          <span>{t('chatRoom.members').replace('{n}', String(members.length))}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowWorkspacePanel(!showWorkspacePanel)}
+            className={`flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors ${
+              showWorkspacePanel ? 'text-blue-400 bg-blue-600/10' : 'text-gray-400 hover:text-white hover:bg-gray-800'
+            }`}
+            title="Workspace files"
+          >
+            <FolderTree size={14} />
+            <span>Files</span>
+          </button>
+          <button
+            onClick={() => setShowMemberPanel(!showMemberPanel)}
+            className="flex items-center gap-1.5 px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors"
+          >
+            <Users size={14} />
+            <span>{t('chatRoom.members').replace('{n}', String(members.length))}</span>
+          </button>
+        </div>
       </div>
 
       {/* Member bar — all agents equal, click to @mention */}
@@ -169,7 +219,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
           );
         })}
         <button
-          onClick={() => setShowAgentCreator(true)}
+          onClick={() => setShowAgentPicker(!showAgentPicker)}
           className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 border border-gray-700 border-dashed transition-colors flex-shrink-0"
           title="Add agent to room"
         >
@@ -181,7 +231,7 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
       {/* Main content area */}
       <div className="flex flex-1 overflow-hidden relative">
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
           {messages.length === 0 && (
             <div className="flex items-center justify-center h-full text-gray-500 text-sm">
               {t('chatRoom.empty')}
@@ -254,6 +304,22 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
             </div>
           </div>
         )}
+
+        {/* Workspace panel (slide-out) */}
+        {showWorkspacePanel && roomId && (
+          <div className="border-l border-gray-800 flex-shrink-0">
+            <WorkspaceExplorer
+              sessionId={roomId}
+              businessScopeId={room?.business_scope_id}
+              refreshKey={messages.length}
+              isGenerating={isSending}
+              width={workspaceWidth}
+              onWidthChange={setWorkspaceWidth}
+              minWidth={200}
+              maxWidth={400}
+            />
+          </div>
+        )}
       </div>
 
       {/* Mention picker */}
@@ -270,6 +336,54 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
               <span className="text-xs text-gray-500 ml-auto">{m.agent.role}</span>
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Agent picker — select existing agents from the organization */}
+      {showAgentPicker && (
+        <div className="mx-4 mb-2 bg-gray-800 border border-gray-700 rounded-lg overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700">
+            <span className="text-xs font-medium text-gray-300">Add Agent to Room</span>
+            <button onClick={() => setShowAgentPicker(false)} className="text-gray-500 hover:text-white">
+              <X size={14} />
+            </button>
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {availableAgents.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-gray-500 text-center">No other agents available</div>
+            ) : (
+              availableAgents.map(agent => (
+                <button
+                  key={agent.id}
+                  onClick={() => handleAddExistingAgent(agent.id)}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-700 transition-colors"
+                >
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-[10px] font-medium flex-shrink-0">
+                    {(agent.display_name || agent.name).charAt(0)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-white truncate">{agent.display_name || agent.name}</div>
+                    <div className="text-[10px] text-gray-500 truncate">{agent.role || 'Agent'}</div>
+                  </div>
+                  {agent.business_scope_id && scopeNameMap[agent.business_scope_id] && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/60 text-gray-400 flex-shrink-0 max-w-[100px] truncate">
+                      {scopeNameMap[agent.business_scope_id]}
+                    </span>
+                  )}
+                  <Plus size={12} className="text-gray-500 flex-shrink-0" />
+                </button>
+              ))
+            )}
+          </div>
+          <div className="border-t border-gray-700">
+            <button
+              onClick={() => { setShowAgentPicker(false); setShowAgentCreator(true); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-blue-400 hover:bg-gray-700 transition-colors"
+            >
+              <Plus size={12} />
+              Create new agent with AI
+            </button>
+          </div>
         </div>
       )}
 
@@ -371,6 +485,15 @@ function MessageBubble({ message, agentName }: { message: RoomMessage; agentName
   }
 
   const isUser = message.type === 'user';
+  const collab = message.collaboration_meta;
+
+  // Collaboration type labels and colors
+  const collabStyle: Record<string, { label: string; color: string }> = {
+    delegation: { label: '委派', color: 'text-orange-400 bg-orange-400/10 border-orange-400/20' },
+    report: { label: '报告', color: 'text-green-400 bg-green-400/10 border-green-400/20' },
+    question: { label: '追问', color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
+    synthesis: { label: '综合', color: 'text-purple-400 bg-purple-400/10 border-purple-400/20' },
+  };
 
   return (
     <div className={`flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}>
@@ -380,7 +503,28 @@ function MessageBubble({ message, agentName }: { message: RoomMessage; agentName
         {isUser ? <User size={14} /> : <Bot size={14} />}
       </div>
       <div className={`max-w-[70%] ${isUser ? 'text-right' : ''}`}>
-        {!isUser && <div className="text-xs text-gray-400 mb-0.5">{agentName}</div>}
+        {/* Agent name + collaboration source label */}
+        {!isUser && (
+          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+            <span className="text-xs text-gray-400">{agentName}</span>
+            {collab && (
+              <>
+                {collab.targetAgentName && (
+                  <>
+                    <span className="text-[10px] text-gray-600">→</span>
+                    <span className="text-xs text-gray-500">{collab.targetAgentName}</span>
+                  </>
+                )}
+                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${collabStyle[collab.messageType]?.color ?? 'text-gray-400 bg-gray-400/10 border-gray-400/20'}`}>
+                  {collabStyle[collab.messageType]?.label ?? collab.messageType}
+                </span>
+                {collab.round > 0 && (
+                  <span className="text-[10px] text-gray-600">R{collab.round}</span>
+                )}
+              </>
+            )}
+          </div>
+        )}
         <div className={`inline-block px-3 py-2 rounded-lg text-sm ${
           isUser
             ? 'bg-blue-600/15 border border-blue-500/20 text-white'

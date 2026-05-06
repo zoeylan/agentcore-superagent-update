@@ -227,3 +227,8 @@ export function resetAgentsStore() {
   }
   initialFetchStarted = false
 }
+
+/** Trigger a background refresh of the agents store. Exported for cross-component sync. */
+export function refreshAgentsStore() {
+  void fetchAgentsFromService(true)
+}

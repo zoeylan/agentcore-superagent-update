@@ -10,6 +10,7 @@ import { supportService } from '../services/support.service.js';
 import { supportSettingsService } from '../services/support-settings.service.js';
 import { supportKnowledgeService } from '../services/support-knowledge.service.js';
 import { surveyService } from '../services/survey.service.js';
+import { supportWorkflowExecutorService } from '../services/support-workflow-executor.service.js';
 import { z } from 'zod';
 import { AppError } from '../middleware/errorHandler.js';
 
@@ -45,6 +46,7 @@ interface DistillRequest { Body: { hours?: number } }
 interface GapReportRequest { Querystring: { days?: string } }
 interface SubmitSurveyRequest { Body: { conversationId: string; rating: number; comment?: string } }
 interface CreateConvRequest { Body: { customerName: string; customerEmail?: string; message: string; channelType?: string; priority?: string } }
+interface WidgetMessageRequest { Params: { id: string }; Body: { content: string; sessionId: string } }
 
 // ============================================================================
 // Support Workspace Routes
@@ -151,6 +153,59 @@ export async function supportRoutes(fastify: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<IdParam>, reply: FastifyReply) => {
       const survey = await surveyService.getSurveyByConversation(request.params.id, request.user!.orgId);
       return reply.send(survey ?? {});
+    });
+
+  // Widget message simulation (for test widget, uses JWT auth instead of API key)
+  fastify.post<WidgetMessageRequest>('/conversations/:id/widget-message', { preHandler: [authenticate] },
+    async (request: FastifyRequest<WidgetMessageRequest>, reply: FastifyReply) => {
+      const { content, sessionId } = validate(z.object({
+        content: z.string().min(1),
+        sessionId: z.string().uuid(),
+      }), request.body);
+
+      const conversationId = request.params.id;
+
+      // Write customer message
+      const { prisma } = await import('../config/database.js');
+      await prisma.chat_messages.create({
+        data: {
+          organization_id: request.user!.orgId,
+          session_id: sessionId,
+          type: 'user',
+          content,
+          metadata: { source: 'test-widget' },
+        },
+      });
+
+      // Get scope from session
+      const session = await prisma.chat_sessions.findFirst({ where: { id: sessionId } });
+      const scopeId = session?.business_scope_id ?? undefined;
+
+      // Execute workflow
+      try {
+        const outcome = await supportWorkflowExecutorService.execute(request.user!.orgId, {
+          message: content,
+          sessionId,
+          conversationId,
+          businessScopeId: scopeId,
+        });
+
+        return reply.send({
+          reply: outcome.reply,
+          handoff: outcome.handoff,
+          resolved: outcome.resolved,
+          intent: outcome.intent,
+          sentiment: outcome.sentiment,
+          faqMatch: outcome.faqMatch,
+          decisionTrail: outcome.decisionTrail,
+          status: outcome.handoff ? 'pending_agent' : outcome.resolved ? 'resolved' : 'open',
+        });
+      } catch {
+        return reply.status(503).send({
+          reply: null, handoff: true, decisionTrail: ['Workflow execution failed'],
+          status: 'pending_agent',
+        });
+      }
     });
 }
 

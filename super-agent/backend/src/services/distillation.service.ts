@@ -39,6 +39,7 @@ export interface DistillationInput {
   scopeId: string;
   sessionId: string;
   agentId: string;
+  userId?: string;
   contentBlocks: ContentBlock[];
   userMessage: string;
 }
@@ -49,6 +50,7 @@ interface DistillationJobData {
   scopeId: string;
   sessionId: string;
   agentId: string;
+  userId?: string;
   userMessage: string;
   contentBlocks: ContentBlock[];
   enqueuedAt: string; // ISO timestamp — used as cursor watermark
@@ -59,6 +61,7 @@ interface ExtractedMemory {
   content: string;
   category: 'pattern' | 'lesson' | 'gap';
   tags: string[];
+  visibility: 'scope' | 'user';
 }
 
 // ---------------------------------------------------------------------------
@@ -84,9 +87,12 @@ Rules:
 - Maximum 3 memories per conversation.
 - Write in the same language as the conversation.
 - If the conversation is purely routine (greetings, simple Q&A with no personal info), return [].
+- For each memory, set "visibility" to classify who should see it:
+  - "scope": Business knowledge, agent capabilities, domain facts — useful for ALL users (e.g., "退货地址已搬迁", "API rate limit is 100/min")
+  - "user": Personal preferences, individual habits, user-specific context — only relevant to THIS user (e.g., "用户喜欢表格格式", "User prefers concise answers")
 
 Output ONLY a JSON array (no markdown fences, no explanation):
-[{"title":"...","content":"...","category":"pattern|lesson|gap","tags":["..."]}]
+[{"title":"...","content":"...","category":"pattern|lesson|gap","tags":["..."],"visibility":"scope|user"}]
 
 If nothing is worth extracting, output: []`;
 
@@ -171,6 +177,7 @@ export class DistillationService {
         scopeId: input.scopeId,
         sessionId: input.sessionId,
         agentId: input.agentId,
+        userId: input.userId,
         userMessage: input.userMessage,
         contentBlocks: input.contentBlocks,
         enqueuedAt: now,
@@ -187,7 +194,7 @@ export class DistillationService {
    * Process a single distillation job.
    */
   private async processJob(job: Job<DistillationJobData>): Promise<void> {
-    const { organizationId, scopeId, sessionId, agentId, userMessage, contentBlocks, enqueuedAt } = job.data;
+    const { organizationId, scopeId, sessionId, agentId, userId, userMessage, contentBlocks, enqueuedAt } = job.data;
 
     // --- Cursor check: skip if this turn was already processed ---
     const cursorKey = `${CURSOR_PREFIX}${scopeId}`;
@@ -236,7 +243,9 @@ export class DistillationService {
         category: memory.category,
         tags: [...memory.tags, 'auto-distilled'],
         is_pinned: false,
-        created_by: null,
+        visibility: memory.visibility,
+        // User-visibility memories need created_by for ownership filtering
+        created_by: memory.visibility === 'user' ? (userId ?? null) : null,
       });
 
       this.syncToVectorMemory(memory, { organizationId, scopeId, agentId }).catch(() => {});
@@ -298,6 +307,7 @@ export class DistillationService {
       if (!Array.isArray(parsed)) return [];
 
       const validCategories = new Set(['pattern', 'lesson', 'gap']);
+      const validVisibilities = new Set(['scope', 'user']);
       return parsed
         .filter(
           (m: unknown): m is ExtractedMemory =>
@@ -314,6 +324,7 @@ export class DistillationService {
           content: m.content.slice(0, 500),
           category: m.category,
           tags: m.tags.filter((t: unknown) => typeof t === 'string').slice(0, 5),
+          visibility: validVisibilities.has(m.visibility) ? m.visibility : 'scope',
         }));
     } catch {
       console.error('[distillation] Failed to parse LLM response:', text.slice(0, 200));

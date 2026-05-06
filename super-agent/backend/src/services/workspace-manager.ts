@@ -161,6 +161,7 @@ export class WorkspaceManager {
     sessionId: string,
     scope: ScopeForWorkspace,
     selectedAgentId: string | null,
+    userId?: string,
   ): Promise<{ workspacePath: string; pluginPaths: string[] }> {
     const workspacePath = this.getSessionWorkspacePath(orgId, scope.id, sessionId);
 
@@ -203,10 +204,10 @@ export class WorkspaceManager {
     };
 
     await Promise.all([
-      this.generateScopeClaudeMd(workspacePath, scope, selectedAgentId),
+      this.generateScopeClaudeMd(workspacePath, scope, selectedAgentId, userId),
       this.generateAgentSubagentFiles(agentsDir, scope.agents, skillsDir),
       this.generateSettings(workspacePath, scope.mcpServers),
-      this.writeMemoryFiles(workspacePath, scope.id),
+      this.writeMemoryFiles(workspacePath, scope.id, userId),
       createDocGroupSymlinks(),
       downloadAllSkills(),
     ]);
@@ -286,13 +287,14 @@ export class WorkspaceManager {
     sessionId: string,
     scope: ScopeForWorkspace,
     selectedAgentId: string | null,
+    userId?: string,
   ): Promise<{ refreshed: boolean; pluginPaths: string[] }> {
     const workspacePath = this.getSessionWorkspacePath(orgId, scope.id, sessionId);
     const manifest = await this.readManifest(workspacePath);
 
     if (!manifest) {
       // No manifest — full provision
-      const result = await this.ensureSessionWorkspace(orgId, sessionId, scope, selectedAgentId);
+      const result = await this.ensureSessionWorkspace(orgId, sessionId, scope, selectedAgentId, userId);
       return { refreshed: true, pluginPaths: result.pluginPaths };
     }
 
@@ -303,7 +305,7 @@ export class WorkspaceManager {
     }
 
     // Refresh
-    await this.refreshSessionWorkspace(workspacePath, scope, selectedAgentId, manifest);
+    await this.refreshSessionWorkspace(workspacePath, scope, selectedAgentId, manifest, userId);
     const pluginPaths = await this.installPlugins(workspacePath, scope.plugins ?? []);
     return { refreshed: true, pluginPaths };
   }
@@ -316,12 +318,13 @@ export class WorkspaceManager {
     scope: ScopeForWorkspace,
     selectedAgentId: string | null,
     manifest: WorkspaceManifest,
+    userId?: string,
   ): Promise<void> {
     // 1. Regenerate CLAUDE.md
-    await this.generateScopeClaudeMd(workspacePath, scope, selectedAgentId);
+    await this.generateScopeClaudeMd(workspacePath, scope, selectedAgentId, userId);
 
     // 1b. Refresh memory files
-    await this.writeMemoryFiles(workspacePath, scope.id);
+    await this.writeMemoryFiles(workspacePath, scope.id, userId);
 
     // 2. Regenerate agent subagent files
     const agentsDir = join(workspacePath, '.claude', 'agents');
@@ -428,6 +431,7 @@ export class WorkspaceManager {
     workspacePath: string,
     scope: ScopeForWorkspace,
     selectedAgentId: string | null,
+    userId?: string,
   ): Promise<void> {
     const lines: string[] = [`# ${scope.name}`, ''];
     if (scope.description) {
@@ -503,7 +507,7 @@ export class WorkspaceManager {
 
     // Memory — pinned memories inlined for instant recall, others on-demand
     const { scopeMemoryRepository: memRepo } = await import('../repositories/scope-memory.repository.js');
-    const pinnedMemories = await memRepo.findForContext(scope.id).then(
+    const pinnedMemories = await memRepo.findForContext(scope.id, userId).then(
       (all) => all.filter((m) => m.is_pinned),
     );
 
@@ -550,10 +554,12 @@ export class WorkspaceManager {
    *   memories/lessons.md  — Mistakes, corrections, improvements
    *   memories/patterns.md — Recurring needs and effective solutions
    *   memories/gaps.md     — Capability gaps and unresolved requests
+   *
+   * Visibility: loads scope-level memories + user's own private memories.
    */
-  async writeMemoryFiles(workspacePath: string, scopeId: string): Promise<void> {
+  async writeMemoryFiles(workspacePath: string, scopeId: string, userId?: string): Promise<void> {
     const { scopeMemoryRepository } = await import('../repositories/scope-memory.repository.js');
-    const memories = await scopeMemoryRepository.findForContext(scopeId);
+    const memories = await scopeMemoryRepository.findForContext(scopeId, userId);
     if (memories.length === 0) return;
 
     const memoriesDir = join(workspacePath, 'memories');

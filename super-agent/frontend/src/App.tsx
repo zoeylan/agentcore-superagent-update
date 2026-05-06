@@ -15,6 +15,7 @@ import { SupportWorkspace } from '@/pages/SupportWorkspace'
 import { SupportSettings } from '@/pages/SupportSettings'
 import { SupportAnalytics } from '@/pages/SupportAnalytics'
 import { SupportKnowledge } from '@/pages/SupportKnowledge'
+import { SupportLive } from '@/pages/SupportLive'
 import { AuthProvider } from '@/services/AuthContext'
 import { ThemeProvider } from '@/services/ThemeContext'
 import { useTranslation } from '@/i18n'
@@ -53,6 +54,7 @@ function AppContent() {
             <Route path="/apps" element={<Marketplace />} />
             <Route path="/apps/:id" element={<AppRunner />} />
             <Route path="/support" element={<SupportWorkspace />} />
+            <Route path="/support/live" element={<SupportLive />} />
             <Route path="/support/settings" element={<SupportSettings />} />
             <Route path="/support/analytics" element={<SupportAnalytics />} />
             <Route path="/support/knowledge" element={<SupportKnowledge />} />

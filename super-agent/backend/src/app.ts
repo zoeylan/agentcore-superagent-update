@@ -30,6 +30,8 @@ import { imQueueService } from './services/im-queue.service.js';
 import { distillationService } from './services/distillation.service.js';
 import { redisService } from './services/redis.service.js';
 
+import { globalAuditHook } from './middleware/auditLog.js';
+
 export async function buildApp(): Promise<FastifyInstance> {
   // Configure logger based on environment
   const loggerConfig =
@@ -196,6 +198,10 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Register API routes (includes health routes)
   await registerRoutes(app);
+
+  // Register global audit hook for enterprise compliance
+  // Automatically logs all successful mutating operations (POST/PUT/PATCH/DELETE)
+  app.addHook('onResponse', globalAuditHook);
 
   // Register WebSocket gateway for real-time workflow execution events
   // Requirements: 5.1, 5.4 - Real-time status updates

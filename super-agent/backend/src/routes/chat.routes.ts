@@ -942,8 +942,9 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * DELETE /api/chat/sessions/:id/workspace/skills/:skillName
    * Delete a skill folder from the session's workspace.
+   * Query param: removeFromScope=true to also unbind the skill from the scope definition.
    */
-  fastify.delete<{ Params: { id: string; skillName: string } }>(
+  fastify.delete<{ Params: { id: string; skillName: string }; Querystring: { removeFromScope?: string } }>(
     '/sessions/:id/workspace/skills/:skillName',
     {
       preHandler: [authenticate],
@@ -957,6 +958,12 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           properties: {
             id: { type: 'string', format: 'uuid' },
             skillName: { type: 'string', minLength: 1 },
+          },
+        },
+        querystring: {
+          type: 'object',
+          properties: {
+            removeFromScope: { type: 'string', enum: ['true', 'false'] },
           },
         },
       },
@@ -978,6 +985,23 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
 
       if (!deleted) {
         return reply.status(404).send({ error: 'Skill not found in workspace' });
+      }
+
+      // If removeFromScope=true, also unbind the skill from the scope definition
+      if (request.query.removeFromScope === 'true' && session.business_scope_id) {
+        try {
+          const { skillService: svc } = await import('../services/skill.service.js');
+          const skill = await svc.findByName(request.user!.orgId, request.params.skillName);
+          if (skill && skill.business_scope_id === session.business_scope_id) {
+            await svc.unbindSkillFromScope(
+              request.user!.orgId,
+              skill.id,
+              session.business_scope_id,
+            );
+          }
+        } catch (err) {
+          console.warn('[workspace] Failed to unbind skill from scope:', err instanceof Error ? err.message : err);
+        }
       }
 
       // In agentcore mode, also delete from the container

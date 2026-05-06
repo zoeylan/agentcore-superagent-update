@@ -76,7 +76,7 @@ export const translations: TranslationData = {
   },
   'dashboard.createBusinessScope': {
     en: 'Create Business Scope',
-    cn: '创建业务范围'
+    cn: '创建业务智能体'
   },
   'dashboard.addNew': {
     en: 'Add New Department',
@@ -269,7 +269,7 @@ export const translations: TranslationData = {
   },
   'agentConfig.businessScope': {
     en: 'Business Scope',
-    cn: '业务范围'
+    cn: '业务智能体'
   },
   'agentConfig.operationalScope': {
     en: 'Operational Scope',
@@ -972,7 +972,7 @@ export const translations: TranslationData = {
   // Business Scope Creator
   'businessScope.create': {
     en: 'Create Business Scope',
-    cn: '创建业务范围'
+    cn: '创建业务智能体'
   },
   'businessScope.inputName': {
     en: 'Enter business domain name',
@@ -1060,7 +1060,7 @@ export const translations: TranslationData = {
   },
   'businessScope.savingProgress': {
     en: 'Creating business scope and {count} agents',
-    cn: '正在创建业务范围和 {count} 个智能体'
+    cn: '正在创建业务智能体和 {count} 个智能体'
   },
   'businessScope.createFailed': {
     en: 'Creation Failed',
@@ -2318,7 +2318,7 @@ export const translations: TranslationData = {
   },
   'room.fromScope': {
     en: 'From Business Scope',
-    cn: '从业务范围导入'
+    cn: '从业务智能体导入'
   },
   'room.fromScopeDesc': {
     en: 'Import all agents from a scope',
@@ -2334,11 +2334,11 @@ export const translations: TranslationData = {
   },
   'room.selectScope': {
     en: 'Select Business Scope',
-    cn: '选择业务范围'
+    cn: '选择业务智能体'
   },
   'room.chooseScope': {
     en: 'Choose a scope...',
-    cn: '选择一个业务范围...'
+    cn: '选择一个业务智能体...'
   },
   'room.titleLabel': {
     en: 'Room Title (optional)',
@@ -2394,11 +2394,11 @@ export const translations: TranslationData = {
   },
   'scopeAccess.openScope': {
     en: 'Open Scope',
-    cn: '开放范围'
+    cn: '开放业务智能体'
   },
   'scopeAccess.restrictedScope': {
     en: 'Restricted Scope',
-    cn: '受限范围'
+    cn: '受限业务智能体'
   },
   'scopeAccess.openDesc': {
     en: 'All organization members can access this scope',
@@ -2430,11 +2430,11 @@ export const translations: TranslationData = {
   },
   'scopeAccess.colScopeRole': {
     en: 'Scope Role',
-    cn: '范围角色'
+    cn: '业务智能体角色'
   },
   'scopeAccess.removeFromScope': {
     en: 'Remove from scope',
-    cn: '从范围中移除'
+    cn: '从业务智能体中移除'
   },
   'scopeAccess.emptyOpen': {
     en: 'No explicit members. All org members have access.',
@@ -2448,7 +2448,7 @@ export const translations: TranslationData = {
   // Scope Memory Panel
   'scopeMemory.title': {
     en: 'Scope Memory',
-    cn: '范围记忆'
+    cn: '记忆'
   },
   'scopeMemory.entries': {
     en: 'entries',
@@ -2472,7 +2472,7 @@ export const translations: TranslationData = {
   },
   'scopeMemory.contentPlaceholder': {
     en: 'What should this scope remember?',
-    cn: '此范围应该记住什么？'
+    cn: '此业务智能体应该记住什么？'
   },
   'scopeMemory.tagsPlaceholder': {
     en: 'Tags (comma-separated)',
@@ -2524,11 +2524,11 @@ export const translations: TranslationData = {
   // Business Scope Dropdown
   'scopeDropdown.searchPlaceholder': {
     en: 'Search scopes...',
-    cn: '搜索业务范围...'
+    cn: '搜索业务智能体...'
   },
   'scopeDropdown.noResults': {
     en: 'No scopes found',
-    cn: '未找到业务范围'
+    cn: '未找到业务智能体'
   },
 
   // Capability Card
@@ -2774,7 +2774,7 @@ export const translations: TranslationData = {
   },
   'docGroups.removeFromScope': {
     en: 'Remove from scope',
-    cn: '从范围中移除'
+    cn: '从业务智能体中移除'
   },
   'docGroups.uploading': {
     en: 'Uploading...',
@@ -3300,7 +3300,7 @@ export const translations: TranslationData = {
   },
   'im.noChannelsHint': {
     en: 'Add a channel to let users chat with this scope from Slack, Discord, or other platforms.',
-    cn: '添加渠道，让用户可以从 Slack、Discord 或其他平台与此范围对话。'
+    cn: '添加渠道，让用户可以从 Slack、Discord 或其他平台与此业务智能体对话。'
   },
   'im.disabled': {
     en: 'Disabled',
@@ -3546,7 +3546,7 @@ export const translations: TranslationData = {
   },
   'scopeProfile.deleteScope': {
     en: 'Delete scope',
-    cn: '删除范围'
+    cn: '删除业务智能体'
   },
   'scopeProfile.agents': {
     en: 'Agents',
@@ -3570,7 +3570,7 @@ export const translations: TranslationData = {
   },
   'scopeProfile.promptPlaceholder': {
     en: 'Define the behavior and personality for this scope...',
-    cn: '定义此范围的行为和个性...'
+    cn: '定义此业务智能体的行为和个性...'
   },
   'scopeProfile.skillsEquipped': {
     en: 'equipped',
@@ -3618,7 +3618,7 @@ export const translations: TranslationData = {
   },
   'scopeProfile.allAssigned': {
     en: 'All agents are already assigned to this scope.',
-    cn: '所有智能体已分配到此范围。'
+    cn: '所有智能体已分配到此业务智能体。'
   },
   'scopeProfile.tasks': {
     en: 'tasks',
@@ -3651,6 +3651,26 @@ export const translations: TranslationData = {
   'scopeProfile.removeFromScope': {
     en: 'Remove',
     cn: '移除'
+  },
+  'scopeProfile.edit': {
+    en: 'Edit',
+    cn: '编辑'
+  },
+  'scopeProfile.model': {
+    en: 'Model',
+    cn: '模型'
+  },
+  'scopeProfile.skills': {
+    en: 'Skills',
+    cn: '技能'
+  },
+  'scopeProfile.modelDefault': {
+    en: 'Default (runtime setting)',
+    cn: '默认（运行时设置）'
+  },
+  'scopeProfile.modelHint': {
+    en: 'Default model for this scope. Changes take effect on the next conversation.',
+    cn: '此业务智能体的默认模型。更改将在下次对话时生效。'
   },
   'scopeProfile.statusCompleted': {
     en: 'Completed',
@@ -3858,12 +3878,12 @@ export const translations: TranslationData = {
   'project.saving': { en: 'Saving...', cn: '保存中...' },
   'project.saveChanges': { en: 'Save Changes', cn: '保存更改' },
   'project.working': { en: 'Working...', cn: '处理中...' },
-  'project.businessScope': { en: 'Business Scope', cn: '业务范围' },
+  'project.businessScope': { en: 'Business Scope', cn: '业务智能体范围' },
   'project.noScopeOption': { en: '— None (agent execution disabled) —', cn: '— 无（智能体执行已禁用）—' },
   'project.noScopeWarning': { en: 'A business scope is required for agent execution. Without it, tasks cannot be automatically processed.', cn: '智能体执行需要业务范围。没有它，任务无法自动处理。' },
   'project.agent': { en: 'Agent', cn: '智能体' },
-  'project.defaultScopeAgent': { en: "Default (scope's primary agent)", cn: '默认（范围主智能体）' },
-  'project.saveScopeAgent': { en: 'Save Scope & Agent', cn: '保存范围和智能体' },
+  'project.defaultScopeAgent': { en: "Default (scope's primary agent)", cn: '默认（业务主智能体）' },
+  'project.saveScopeAgent': { en: 'Save Scope & Agent', cn: '保存业务智能体' },
   'project.autoProcess': { en: 'Auto-process Todo items', cn: '自动处理待处理项' },
   'project.autoProcessDesc': { en: 'Automatically picks up Todo items and assigns them to the agent.', cn: '自动获取待处理项并分配给智能体。' },
   'project.criticalPriority': { en: '🔴 Critical', cn: '🔴 紧急' },
@@ -4000,10 +4020,10 @@ export const translations: TranslationData = {
 
   // Workflow Editor
   'workflowEditor.workflows': { en: 'Workflows', cn: '工作流' },
-  'workflowEditor.selectScope': { en: 'Select scope', cn: '选择范围' },
+  'workflowEditor.selectScope': { en: 'Select scope', cn: '选择业务智能体' },
   'workflowEditor.expandList': { en: 'Expand workflow list', cn: '展开工作流列表' },
   'workflowEditor.collapsePanel': { en: 'Collapse panel', cn: '折叠面板' },
-  'workflowEditor.noWorkflows': { en: 'No workflows in this scope', cn: '此范围无工作流' },
+  'workflowEditor.noWorkflows': { en: 'No workflows in this scope', cn: '此业务智能体无工作流' },
   'workflowEditor.unsavedChanges': { en: 'Unsaved changes', cn: '未保存的更改' },
   'workflowEditor.executionHistory': { en: 'Execution History', cn: '执行历史' },
   'workflowEditor.noHistory': { en: 'No executions yet', cn: '暂无执行记录' },
@@ -4042,9 +4062,9 @@ export const translations: TranslationData = {
   'tools.noSkillMd': { en: 'No SKILL.md files found in the archive.', cn: '压缩包中未找到 SKILL.md 文件。' },
 
   // Chat Page
-  'chat.selectScopeOrAgent': { en: 'Select scope or agent', cn: '选择范围或智能体' },
-  'chat.searchScopesAgents': { en: 'Search scopes or agents...', cn: '搜索范围或智能体...' },
-  'chat.businessScopes': { en: 'Business Scopes', cn: '业务范围' },
+  'chat.selectScopeOrAgent': { en: 'Select scope or agent', cn: '选择智能体' },
+  'chat.searchScopesAgents': { en: 'Search scopes or agents...', cn: '搜索智能体...' },
+  'chat.businessScopes': { en: 'Business Scopes', cn: '业务智能体' },
   'chat.independentAgents': { en: 'Independent Agents', cn: '独立智能体' },
   'chat.noResultsFound': { en: 'No results found', cn: '未找到结果' },
   'chat.loadingScopes': { en: 'Loading scopes...', cn: '加载范围中...' },
@@ -4170,6 +4190,11 @@ export const translations: TranslationData = {
 
   // ShowcasePage residuals
   'showcase.view': { en: 'View', cn: '查看' },
+  'showcase.myFavorites': { en: 'My Favorites', cn: '我的收藏' },
+  'showcase.noFavorites': { en: 'No favorites yet', cn: '暂无收藏的会话' },
+  'showcase.noFavoritesHint': { en: 'Star a chat session to save it here.', cn: '在对话中点击收藏按钮，收藏的会话将显示在这里。' },
+  'showcase.favoritesCount': { en: 'favorites', cn: '条收藏' },
+  'showcase.removeFavorite': { en: 'Remove from favorites', cn: '取消收藏' },
 
   // ProjectBoard
   'project.aiTriage': { en: 'AI Triage', cn: 'AI 分诊' },
@@ -4388,5 +4413,95 @@ export const translations: TranslationData = {
   'support.category': { en: 'Category', cn: '分类' },
   'support.conditions': { en: 'Conditions', cn: '触发条件' },
   'support.actions': { en: 'Actions', cn: '触发动作' },
-  'support.rulePriority': { en: 'Rule Priority', cn: '规则优先级' }
+  'support.rulePriority': { en: 'Rule Priority', cn: '规则优先级' },
+
+  // Skills Panel
+  'skills.title': { en: 'Skills', cn: '技能' },
+  'skills.tabInstalled': { en: 'Installed', cn: '已安装' },
+  'skills.tabInternal': { en: 'Internal', cn: '内部' },
+  'skills.tabExternal': { en: 'External', cn: '外部' },
+  'skills.deleteConfirmTitle': { en: 'Remove Skill', cn: '移除技能' },
+  'skills.deleteConfirmDesc': { en: 'Do you also want to remove "{skillName}" from the scope definition? If removed, new sessions will no longer include this skill automatically.', cn: '是否同时从 Scope 定义中移除「{skillName}」？移除后，新会话将不再自动包含此技能。' },
+  'skills.deleteFromBoth': { en: 'Remove from session & scope definition', cn: '从会话和 Scope 定义中移除' },
+  'skills.deleteFromSession': { en: 'Remove from this session only', cn: '仅从当前会话移除' },
+  'common.cancel': { en: 'Cancel', cn: '取消' },
+
+  // Audit Logs
+  'audit.title': { en: 'Audit Logs', cn: '审计日志' },
+  'audit.subtitle': { en: 'Track all operations for compliance and security', cn: '追踪所有操作以满足合规和安全要求' },
+  'audit.export': { en: 'Export CSV', cn: '导出 CSV' },
+  'audit.exporting': { en: 'Exporting...', cn: '导出中...' },
+  'audit.noLogs': { en: 'No audit logs found', cn: '未找到审计日志' },
+  'audit.noLogsHint': { en: 'Audit logs will appear here as operations are performed.', cn: '执行操作后审计日志将显示在此处。' },
+  'audit.filterByUser': { en: 'Filter by user', cn: '按用户筛选' },
+  'audit.filterByAction': { en: 'Filter by action', cn: '按操作筛选' },
+  'audit.filterByResource': { en: 'Filter by resource', cn: '按资源筛选' },
+  'audit.filterByScope': { en: 'Filter by scope', cn: '按业务智能体筛选' },
+  'audit.filterByDate': { en: 'Date range', cn: '日期范围' },
+  'audit.colTimestamp': { en: 'Timestamp', cn: '时间' },
+  'audit.colUser': { en: 'User', cn: '用户' },
+  'audit.colAction': { en: 'Action', cn: '操作' },
+  'audit.colResource': { en: 'Resource', cn: '资源' },
+  'audit.colScope': { en: 'Scope', cn: '业务智能体' },
+  'audit.colIp': { en: 'IP Address', cn: 'IP 地址' },
+  'audit.stats': { en: 'Statistics', cn: '统计' },
+  'audit.totalEvents': { en: 'Total Events', cn: '总事件数' },
+  'audit.uniqueActors': { en: 'Unique Users', cn: '活跃用户数' },
+  'audit.topActions': { en: 'Top Actions', cn: '高频操作' },
+  'audit.last30Days': { en: 'Last 30 days', cn: '最近 30 天' },
+  'audit.allUsers': { en: 'All users', cn: '所有用户' },
+  'audit.allActions': { en: 'All actions', cn: '所有操作' },
+  'audit.allResources': { en: 'All resources', cn: '所有资源' },
+  'audit.allScopes': { en: 'All scopes', cn: '所有业务智能体' },
+
+  // Scope Access Panel
+  'scopeAccess.title': { en: 'Access Control', cn: '访问控制' },
+  'scopeAccess.openScope': { en: 'Open Scope', cn: '开放范围' },
+  'scopeAccess.restrictedScope': { en: 'Restricted Scope', cn: '受限范围' },
+  'scopeAccess.openDesc': { en: 'All organization members can access this scope', cn: '所有组织成员均可访问此范围' },
+  'scopeAccess.restrictedDesc': { en: 'Only explicitly added members can access this scope', cn: '仅明确添加的成员可访问此范围' },
+  'scopeAccess.restrict': { en: 'Restrict', cn: '设为受限' },
+  'scopeAccess.open': { en: 'Open', cn: '设为开放' },
+  'scopeAccess.addMember': { en: 'Add Member', cn: '添加成员' },
+  'scopeAccess.selectMember': { en: 'Select a member...', cn: '选择成员...' },
+  'scopeAccess.emptyOpen': { en: 'No explicit members — all org members have access.', cn: '无明确成员——所有组织成员均可访问。' },
+  'scopeAccess.emptyRestricted': { en: 'No members added. Only org admins can access.', cn: '未添加成员。仅组织管理员可访问。' },
+  'scopeAccess.colMember': { en: 'Member', cn: '成员' },
+  'scopeAccess.colScopeRole': { en: 'Scope Role', cn: '范围角色' },
+  'scopeAccess.removeFromScope': { en: 'Remove from scope', cn: '从范围移除' },
+
+  // ============================================================================
+  // A2A External Access
+  // ============================================================================
+  'scopeProfile.a2aTitle': { en: 'External Access (A2A)', cn: '外部访问 (A2A)' },
+  'scopeProfile.a2aDescription': { en: 'Allow external systems to discover and invoke agents in this scope via the A2A protocol.', cn: '允许外部系统通过 A2A 协议发现和调用此范围内的智能体。' },
+  'scopeProfile.a2aHint': { en: 'Enabled agents are registered to AWS AgentCore Registry. External systems can discover them via semantic search and invoke through A2A protocol.', cn: '已启用的智能体会注册到 AWS AgentCore Registry。外部系统可通过语义搜索发现并通过 A2A 协议调用。' },
+
+  // ============================================================================
+  // Customer Service Section (Scope Detail)
+  // ============================================================================
+  'cs.title': { en: 'Customer Service', cn: '客户服务' },
+  'cs.online': { en: 'Online', cn: '在线' },
+  'cs.offline': { en: 'Offline', cn: '离线' },
+  'cs.conversations': { en: 'Conversations', cn: '对话数' },
+  'cs.aiResolved': { en: 'AI Resolved', cn: 'AI 解决率' },
+  'cs.csat': { en: 'CSAT', cn: '满意度' },
+  'cs.widgetApiKey': { en: 'Widget API Key', cn: 'Widget API 密钥' },
+  'cs.copy': { en: 'Copy', cn: '复制' },
+  'cs.copied': { en: 'Copied', cn: '已复制' },
+  'cs.saveKeyWarning': { en: "⚠ Save this key now — it won't be shown again", cn: '⚠ 请立即保存此密钥——不会再次显示' },
+  'cs.testWidget': { en: 'Test Widget', cn: '测试 Widget' },
+  'cs.addFaq': { en: 'Add FAQ', cn: '添加 FAQ' },
+  'cs.faqKnowledgeBase': { en: 'FAQ Knowledge Base', cn: 'FAQ 知识库' },
+  'cs.published': { en: 'published', cn: '已发布' },
+  'cs.drafts': { en: 'drafts', cn: '草稿' },
+  'cs.noFaqYet': { en: 'No FAQ articles yet. Add some to improve AI accuracy.', cn: '暂无 FAQ 文章。添加一些以提高 AI 准确率。' },
+  'cs.enableDescription': { en: 'Enable customer service to let AI handle external customer inquiries', cn: '启用客户服务，让 AI 处理外部客户咨询' },
+  'cs.enableHint': { en: "AI will use this scope's agents, skills, and knowledge to respond", cn: 'AI 将使用此范围的智能体、技能和知识来回复' },
+  'cs.addFaqTitle': { en: 'Add FAQ Article', cn: '添加 FAQ 文章' },
+  'cs.question': { en: 'Question', cn: '问题' },
+  'cs.answer': { en: 'Answer', cn: '回答' },
+  'cs.category': { en: 'Category', cn: '分类' },
+  'cs.createFaq': { en: 'Create FAQ', cn: '创建 FAQ' },
+  'cs.cancel': { en: 'Cancel', cn: '取消' }
 }

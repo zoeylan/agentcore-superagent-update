@@ -20,11 +20,13 @@ import { RehearsalPanel } from './RehearsalPanel'
 import { MCPCatalogPanel, type CustomMcpServer } from './MCPCatalogPanel'
 import { ConnectorPanel } from './ConnectorPanel'
 import { SkillsPanel } from './SkillsPanel'
+import { CustomerServiceSection } from './CustomerServiceSection'
 import {
   getAvatarDisplayUrl,
   getAvatarFallback,
   shouldShowAvatarImage,
 } from '@/utils/avatarUtils'
+import { refreshAgentsStore } from '@/services/useAgents'
 import { translations } from '@/i18n/translations'
 
 /** Module-level t() — no React context dependency */
@@ -716,7 +718,7 @@ export function ScopeProfile({ scope, agents, allAgents = [], onDeleteScope, onA
                 onClick={() => setIsEditingPrompt(true)}
                 className="flex items-center gap-1 text-[10px] px-2 py-1 rounded text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
               >
-                <Pencil className="w-3 h-3" /> Edit
+                <Pencil className="w-3 h-3" /> {t('scopeProfile.edit')}
               </button>
             )}
           </div>
@@ -774,7 +776,7 @@ export function ScopeProfile({ scope, agents, allAgents = [], onDeleteScope, onA
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-yellow-400" />
-              <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Skills</h3>
+              <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('scopeProfile.skills')}</h3>
               <span className="text-[10px] text-gray-600">{scopeSkills.length} {t('scopeProfile.skillsEquipped')}</span>
             </div>
             <button
@@ -1116,6 +1118,16 @@ export function ScopeProfile({ scope, agents, allAgents = [], onDeleteScope, onA
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden p-4">
           <RehearsalPanel scopeId={scope.id} scopeName={scope.name} />
         </div>
+
+        {/* ============================================================ */}
+        {/*  A2A External Access                                          */}
+        {/* ============================================================ */}
+        <A2AScopeSection agents={agents} scopeId={scope.id} />
+
+        {/* ============================================================ */}
+        {/*  Customer Service                                             */}
+        {/* ============================================================ */}
+        <CustomerServiceSection scope={scope} />
       </div>
 
       {/* Skills Panel slide-out */}
@@ -1184,7 +1196,7 @@ function ModelConfigSection({ scope, onSave, onError }: {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Zap className="w-4 h-4 text-purple-400" />
-          <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Model</h3>
+          <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{t('scopeProfile.model')}</h3>
         </div>
         {isSaving && <Loader2 className="w-3 h-3 animate-spin text-purple-400" />}
       </div>
@@ -1202,7 +1214,7 @@ function ModelConfigSection({ scope, onSave, onError }: {
             disabled={isSaving}
             className="w-full px-3 py-2 text-xs bg-gray-800 border border-gray-700 rounded-lg text-white focus:border-purple-500 focus:outline-none font-mono appearance-none cursor-pointer disabled:opacity-50"
           >
-            <option value="">Default (runtime setting)</option>
+            <option value="">{t('scopeProfile.modelDefault')}</option>
             {models.map(m => (
               <option key={m.litellm_model} value={m.litellm_model}>
                 {m.id} — {m.provider}
@@ -1211,7 +1223,92 @@ function ModelConfigSection({ scope, onSave, onError }: {
           </select>
         )}
         <p className="text-[10px] text-gray-500">
-          Default model for this scope. Changes take effect on the next conversation.
+          {t('scopeProfile.modelHint')}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  A2A External Access Section                                        */
+/* ------------------------------------------------------------------ */
+
+function A2AScopeSection({ agents, scopeId }: { agents: Agent[]; scopeId: string }) {
+  const [a2aStates, setA2aStates] = useState<Record<string, boolean>>({})
+  const [saving, setSaving] = useState<string | null>(null)
+
+  // Initialize from agent data
+  useEffect(() => {
+    const states: Record<string, boolean> = {}
+    for (const agent of agents) {
+      states[agent.id] = agent.a2aEnabled ?? false
+    }
+    setA2aStates(states)
+  }, [agents])
+
+  const handleToggle = async (agentId: string) => {
+    const newValue = !a2aStates[agentId]
+    setSaving(agentId)
+    try {
+      await restClient.put(`/api/agents/${agentId}`, {
+        a2a_enabled: newValue,
+      })
+      setA2aStates(prev => ({ ...prev, [agentId]: newValue }))
+      // Trigger global agent store refresh so other views stay in sync
+      refreshAgentsStore()
+    } catch (err) {
+      console.error('Failed to toggle A2A:', err)
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  if (agents.length === 0) return null
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Shield className="w-4 h-4 text-blue-400" />
+        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
+          {t('scopeProfile.a2aTitle')}
+        </h3>
+      </div>
+      <p className="text-xs text-gray-500 mb-3">
+        {t('scopeProfile.a2aDescription')}
+      </p>
+      <div className="space-y-2">
+        {agents.map(agent => (
+          <div
+            key={agent.id}
+            className="flex items-center justify-between p-2.5 bg-gray-800/50 border border-gray-700/50 rounded-lg"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-medium flex-shrink-0">
+                {agent.displayName.charAt(0)}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm text-white truncate">{agent.displayName}</p>
+                <p className="text-[10px] text-gray-500 truncate">{agent.role}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => handleToggle(agent.id)}
+              disabled={saving === agent.id}
+              className={`relative w-10 h-5.5 rounded-full transition-colors flex-shrink-0 ${
+                a2aStates[agent.id] ? 'bg-blue-600' : 'bg-gray-600'
+              } ${saving === agent.id ? 'opacity-50' : ''}`}
+            >
+              <span className={`absolute top-0.5 left-0.5 w-4.5 h-4.5 bg-white rounded-full transition-transform ${
+                a2aStates[agent.id] ? 'translate-x-[18px]' : ''
+              }`} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 p-2.5 bg-blue-900/10 border border-blue-500/20 rounded-lg">
+        <p className="text-[10px] text-blue-400">
+          {t('scopeProfile.a2aHint')}
         </p>
       </div>
     </div>

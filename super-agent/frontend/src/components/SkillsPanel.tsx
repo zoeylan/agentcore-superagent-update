@@ -137,6 +137,9 @@ export function SkillsPanel({ open, onClose, sessionId, scopeId, onScopeSkillsCh
   // Deleting
   const [deletingSkill, setDeletingSkill] = useState<string | null>(null)
 
+  // Confirmation dialog for removing skill from scope definition
+  const [confirmDeleteSkill, setConfirmDeleteSkill] = useState<string | null>(null)
+
   // ── Load installed skills (session workspace mode) ──
   const loadInstalled = useCallback(async () => {
     if (!sessionId) return
@@ -376,21 +379,30 @@ export function SkillsPanel({ open, onClose, sessionId, scopeId, onScopeSkillsCh
         setDeletingSkill(null)
       }
     } else {
+      // In session mode: show confirmation dialog asking whether to also remove from scope
       if (!sessionId) return
-      setDeletingSkill(skillName)
-      setError(null)
-      try {
-        await restClient.delete(
-          `/api/chat/sessions/${sessionId}/workspace/skills/${encodeURIComponent(skillName)}`,
-        )
-        await loadInstalled()
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Delete failed')
-      } finally {
-        setDeletingSkill(null)
-      }
+      setConfirmDeleteSkill(skillName)
     }
-  }, [isScopeMode, scopeId, scopeSkills, sessionId, loadInstalled, loadScopeSkills, onScopeSkillsChanged])
+  }, [isScopeMode, scopeId, scopeSkills, sessionId, loadScopeSkills, onScopeSkillsChanged])
+
+  // Actually perform the delete after user confirms
+  const executeDelete = useCallback(async (skillName: string, removeFromScope: boolean) => {
+    if (!sessionId) return
+    setConfirmDeleteSkill(null)
+    setDeletingSkill(skillName)
+    setError(null)
+    try {
+      const qs = removeFromScope ? '?removeFromScope=true' : ''
+      await restClient.delete(
+        `/api/chat/sessions/${sessionId}/workspace/skills/${encodeURIComponent(skillName)}${qs}`,
+      )
+      await loadInstalled()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed')
+    } finally {
+      setDeletingSkill(null)
+    }
+  }, [sessionId, loadInstalled])
 
   const installedNames = new Set(
     isScopeMode
@@ -505,6 +517,39 @@ export function SkillsPanel({ open, onClose, sessionId, scopeId, onScopeSkillsCh
           )}
         </div>
       </div>
+
+      {/* Confirmation dialog for removing skill from scope definition */}
+      {confirmDeleteSkill && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setConfirmDeleteSkill(null)} />
+          <div className="relative bg-gray-900 border border-gray-700 rounded-xl shadow-2xl p-5 max-w-sm w-full mx-4">
+            <h3 className="text-sm font-semibold text-white mb-2">{t('skills.deleteConfirmTitle')}</h3>
+            <p className="text-xs text-gray-400 mb-4">
+              {t('skills.deleteConfirmDesc').replace('{skillName}', confirmDeleteSkill)}
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => executeDelete(confirmDeleteSkill, true)}
+                className="w-full px-3 py-2 text-xs font-medium rounded-lg bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/30 transition-colors"
+              >
+                {t('skills.deleteFromBoth')}
+              </button>
+              <button
+                onClick={() => executeDelete(confirmDeleteSkill, false)}
+                className="w-full px-3 py-2 text-xs font-medium rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 transition-colors"
+              >
+                {t('skills.deleteFromSession')}
+              </button>
+              <button
+                onClick={() => setConfirmDeleteSkill(null)}
+                className="w-full px-3 py-2 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                {t('common.cancel')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -120,9 +120,72 @@ if [ "$SKIP_CDK" = false ]; then
     echo "  Attempt $i/30 - status: $STATUS, waiting 10s..."
     sleep 10
   done
+
+  # Wait for UserData bootstrap to complete (fetch-db-url.sh is created at the end)
+  echo "  Waiting for EC2 UserData bootstrap to complete..."
+  for i in $(seq 1 60); do
+    BOOTSTRAP_CHECK=$(aws ssm send-command \
+      --instance-ids "$INSTANCE_ID" --region "$REGION" \
+      --document-name AWS-RunShellScript \
+      --parameters 'commands=["test -f /opt/super-agent/fetch-db-url.sh && echo READY || echo WAITING"]' \
+      --output text --query "Command.CommandId" 2>/dev/null || echo "")
+    if [ -n "$BOOTSTRAP_CHECK" ]; then
+      sleep 5
+      RESULT=$(aws ssm get-command-invocation \
+        --command-id "$BOOTSTRAP_CHECK" --instance-id "$INSTANCE_ID" \
+        --region "$REGION" --query "StandardOutputContent" --output text 2>/dev/null || echo "WAITING")
+      if echo "$RESULT" | grep -q "READY"; then
+        echo "  EC2 bootstrap complete."
+        break
+      fi
+    fi
+    echo "  Attempt $i/60 - bootstrap still running, waiting 10s..."
+    sleep 10
+  done
 else
   echo ""
   echo "=== Phase 1: CDK Deploy (skipped) ==="
+fi
+
+# =========================================================================
+# Fix CloudFront EC2 origin (replace placeholder with actual EC2 public DNS)
+# =========================================================================
+if [ -n "$DOMAIN_NAME" ]; then
+  CF_DIST_ID=$(aws cloudformation describe-stacks \
+    --stack-name "$STACK_NAME" --region "$REGION" \
+    --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" --output text 2>/dev/null || echo "")
+  if [ -n "$CF_DIST_ID" ] && [ "$CF_DIST_ID" != "None" ]; then
+    INSTANCE_ID_FOR_DNS=$(aws cloudformation describe-stacks \
+      --stack-name "$STACK_NAME" --region "$REGION" \
+      --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue" --output text)
+    EC2_PUBLIC_DNS=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID_FOR_DNS" --region "$REGION" \
+      --query "Reservations[0].Instances[0].PublicDnsName" --output text 2>/dev/null || echo "")
+    if [ -n "$EC2_PUBLIC_DNS" ] && [ "$EC2_PUBLIC_DNS" != "None" ]; then
+      # Check if origin still has placeholder
+      CURRENT_ORIGINS=$(aws cloudfront get-distribution-config --id "$CF_DIST_ID" \
+        --query "DistributionConfig.Origins.Items[*].DomainName" --output text 2>/dev/null || echo "")
+      if echo "$CURRENT_ORIGINS" | grep -q "ec2-placeholder"; then
+        echo ""
+        echo "=== Updating CloudFront EC2 origin → $EC2_PUBLIC_DNS ==="
+        CF_ETAG=$(aws cloudfront get-distribution-config --id "$CF_DIST_ID" --query "ETag" --output text)
+        aws cloudfront get-distribution-config --id "$CF_DIST_ID" --output json | \
+          python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+config = data['DistributionConfig']
+for origin in config['Origins']['Items']:
+    if 'ec2-placeholder' in origin['DomainName']:
+        origin['DomainName'] = '$EC2_PUBLIC_DNS'
+json.dump(config, open('/tmp/cf-origin-fix.json', 'w'))
+"
+        aws cloudfront update-distribution --id "$CF_DIST_ID" --if-match "$CF_ETAG" \
+          --distribution-config file:///tmp/cf-origin-fix.json \
+          --query "Distribution.Status" --output text 2>/dev/null || true
+        rm -f /tmp/cf-origin-fix.json
+        echo "  CloudFront origin updated."
+      fi
+    fi
+  fi
 fi
 
 # =========================================================================
@@ -151,8 +214,11 @@ if [ "$SKIP_AGENTCORE" = false ]; then
   echo "  ECR: $ECR_URI"
 
   # --- 3b: IAM Execution Role ---
+  # Role and policy names are scoped by stack name to avoid conflicts
+  # when multiple stacks share the same AWS account.
   echo "  [3b] Ensuring IAM execution role..."
-  ROLE_NAME="super-agent-agentcore-execution-role"
+  ROLE_NAME="super-agent-agentcore-role-${STACK_NAME}"
+  POLICY_NAME="agentcore-permissions-${STACK_NAME}"
 
   if ! aws iam get-role --role-name "$ROLE_NAME" 2>/dev/null; then
     echo "  Creating role $ROLE_NAME..."
@@ -166,18 +232,21 @@ if [ "$SKIP_AGENTCORE" = false ]; then
           "Action": "sts:AssumeRole"
         }]
       }' \
-      --description "Execution role for Super Agent AgentCore containers"
+      --description "Execution role for Super Agent AgentCore containers ($STACK_NAME)"
   fi
 
   # Always update permissions to latest
-  echo "  Updating permissions policy..."
-  WORKSPACE_BUCKET_NAME="super-agent-workspaces-$ACCOUNT_ID"
+  echo "  Updating permissions policy ($POLICY_NAME)..."
+  # Read the actual workspace bucket name from stack outputs (matches CDK: super-agent-workspace-<account>)
+  WORKSPACE_BUCKET_NAME=$(aws cloudformation describe-stacks \
+    --stack-name "$STACK_NAME" --region "$REGION" \
+    --query "Stacks[0].Outputs[?OutputKey=='WorkspaceBucketName'].OutputValue" --output text 2>/dev/null || echo "super-agent-workspace-$ACCOUNT_ID")
   SKILLS_BUCKET_NAME=$(aws cloudformation describe-stacks \
     --stack-name "$STACK_NAME" --region "$REGION" \
     --query "Stacks[0].Outputs[?OutputKey=='SkillsBucketName'].OutputValue" --output text 2>/dev/null || echo "")
   aws iam put-role-policy \
     --role-name "$ROLE_NAME" \
-    --policy-name agentcore-permissions \
+    --policy-name "$POLICY_NAME" \
     --policy-document "{
       \"Version\": \"2012-10-17\",
       \"Statement\": [
@@ -262,15 +331,16 @@ if [ "$SKIP_AGENTCORE" = false ]; then
   ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/$ROLE_NAME"
 
   # Build environment variables JSON
-  ENV_VARS="{\"CLAUDE_CODE_USE_BEDROCK\":\"1\",\"ANTHROPIC_MODEL\":\"us.anthropic.claude-opus-4-6-v1\",\"AWS_REGION\":\"$REGION\",\"WORKSPACE_S3_REGION\":\"us-east-1\""
+  ENV_VARS="{\"CLAUDE_CODE_USE_BEDROCK\":\"1\",\"ANTHROPIC_MODEL\":\"us.anthropic.claude-opus-4-6-v1\",\"AWS_REGION\":\"$REGION\",\"WORKSPACE_S3_REGION\":\"$REGION\""
   if [ -n "$BEDROCK_AK" ] && [ -n "$BEDROCK_SK" ]; then
     ENV_VARS="$ENV_VARS,\"AWS_ACCESS_KEY_ID\":\"$BEDROCK_AK\",\"AWS_SECRET_ACCESS_KEY\":\"$BEDROCK_SK\""
   fi
   ENV_VARS="$ENV_VARS}"
 
-  # Try to find existing runtime
+  # Try to find existing runtime (stack-scoped name)
+  RUNTIME_NAME="${STACK_NAME}Runtime"
   RUNTIME_ID=$(aws bedrock-agentcore-control list-agent-runtimes --region "$REGION" \
-    --query "agentRuntimeSummaries[?agentRuntimeName=='superAgentRuntime'].agentRuntimeId" \
+    --query "agentRuntimes[?agentRuntimeName=='${RUNTIME_NAME}'].agentRuntimeId" \
     --output text 2>/dev/null || echo "")
 
   if [ -n "$RUNTIME_ID" ] && [ "$RUNTIME_ID" != "None" ]; then
@@ -285,7 +355,7 @@ if [ "$SKIP_AGENTCORE" = false ]; then
   else
     echo "  Creating new runtime..."
     RUNTIME_OUTPUT=$(aws bedrock-agentcore-control create-agent-runtime \
-      --agent-runtime-name superAgentRuntime \
+      --agent-runtime-name "${RUNTIME_NAME}" \
       --agent-runtime-artifact "{\"containerConfiguration\":{\"containerUri\":\"$ECR_URI:latest\"}}" \
       --role-arn "$ROLE_ARN" \
       --network-configuration '{"networkMode":"PUBLIC"}' \

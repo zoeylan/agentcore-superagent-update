@@ -183,6 +183,9 @@ export function SupportWorkspace() {
 
           {/* Sub-navigation */}
           <div className="flex gap-1 mb-3">
+            <button onClick={() => navigate('/support/live')} className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-white/10 rounded transition-colors">
+              <BarChart3 className="w-3 h-3" /> Live Monitor
+            </button>
             <button onClick={() => navigate('/support/settings')} className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-white/10 rounded transition-colors">
               <Settings className="w-3 h-3" /> {t('support.settings')}
             </button>

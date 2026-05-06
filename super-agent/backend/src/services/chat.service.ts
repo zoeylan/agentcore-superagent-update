@@ -384,8 +384,9 @@ export class ChatService {
     console.log(`[provisionSessionWorkspace] Provisioning workspace for session=${sessionId}, scope=${scopeId}, skills=${scopeForWorkspace.skills.length}, agents=${scopeForWorkspace.agents.length}`);
 
     // Provision workspace (idempotent — ensureWorkspaceUpToDate handles existing ones)
+    // Pass session's user_id for memory visibility isolation
     const result = await this.workspaceManager.ensureSessionWorkspace(
-      organizationId, sessionId, scopeForWorkspace, selectedAgentId,
+      organizationId, sessionId, scopeForWorkspace, selectedAgentId, session.user_id,
     );
 
     console.log(`[provisionSessionWorkspace] Workspace provisioned at ${result.workspacePath}, plugins=${result.pluginPaths.length}`);
@@ -910,7 +911,7 @@ export class ChatService {
 
       // Provision new workspace
       const provisionResult = await this.workspaceManager.ensureSessionWorkspace(
-        organizationId, sessionId, scopeForWorkspace, selectedAgentId,
+        organizationId, sessionId, scopeForWorkspace, selectedAgentId, userId,
       );
       pluginPaths = provisionResult.pluginPaths;
     } else {
@@ -918,7 +919,7 @@ export class ChatService {
 
       // Lazy refresh: check if workspace is up-to-date
       const refreshResult = await this.workspaceManager.ensureWorkspaceUpToDate(
-        organizationId, sessionId, scopeForWorkspace, selectedAgentId,
+        organizationId, sessionId, scopeForWorkspace, selectedAgentId, userId,
       );
       pluginPaths = refreshResult.pluginPaths;
     }

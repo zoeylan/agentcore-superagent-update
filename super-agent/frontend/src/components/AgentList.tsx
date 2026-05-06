@@ -1,9 +1,10 @@
-import { Users, Monitor, Megaphone, DollarSign, Headphones, Briefcase, Settings, TrendingUp, Search, User } from 'lucide-react'
+import { Users, Monitor, Megaphone, DollarSign, Headphones, Briefcase, Settings, TrendingUp, Search, User, LayoutGrid, List } from 'lucide-react'
 import { useState } from 'react'
 import type { Agent, AgentStatus } from '@/types'
 import { useTranslation } from '@/i18n'
 import { useBusinessScopes } from '@/services/useBusinessScopes'
 import { getAvatarDisplayUrl, getAvatarFallback, shouldShowAvatarImage } from '@/utils/avatarUtils'
+import { AgentCard } from './AgentCard'
 
 interface AgentListProps {
   agents: Agent[]
@@ -47,6 +48,7 @@ export function AgentList({ agents, selectedAgentId, selectedScopeId, onSelectAg
   const { t } = useTranslation()
   const { businessScopes } = useBusinessScopes()
   const [search, setSearch] = useState('')
+  const [viewMode, setViewMode] = useState<'list' | 'card'>('list')
 
   const query = search.trim().toLowerCase()
 
@@ -231,17 +233,35 @@ export function AgentList({ agents, selectedAgentId, selectedScopeId, onSelectAg
 
   return (
     <div className="h-full flex flex-col">
-      {/* Search */}
+      {/* Search + View Toggle */}
       <div className="px-2 py-2 border-b border-gray-800">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
-          <input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder={t('agentList.searchPlaceholder')}
-            className="w-full pl-8 pr-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded-md text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
-          />
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder={t('agentList.searchPlaceholder')}
+              className="w-full pl-8 pr-3 py-1.5 text-sm bg-gray-800 border border-gray-700 rounded-md text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+            />
+          </div>
+          <div className="flex items-center bg-gray-800 rounded-md border border-gray-700 p-0.5">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-1 rounded transition-colors ${viewMode === 'list' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+              title="List view"
+            >
+              <List size={14} />
+            </button>
+            <button
+              onClick={() => setViewMode('card')}
+              className={`p-1 rounded transition-colors ${viewMode === 'card' ? 'bg-gray-700 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+              title="Card view"
+            >
+              <LayoutGrid size={14} />
+            </button>
+          </div>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto">
@@ -279,7 +299,21 @@ export function AgentList({ agents, selectedAgentId, selectedScopeId, onSelectAg
 
               {/* Agent Items */}
               <div className="space-y-1 px-2">
-                {scopeAgents.map(renderAgentCard)}
+                {viewMode === 'card' ? (
+                  <div className="grid grid-cols-2 gap-1.5 pt-1">
+                    {scopeAgents.map(agent => (
+                      <AgentCard
+                        key={agent.id}
+                        agent={agent}
+                        scopeName={scopeInfo.name}
+                        isSelected={agent.id === selectedAgentId}
+                        onClick={() => onSelectAgent(agent.id)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  scopeAgents.map(renderAgentCard)
+                )}
               </div>
             </div>
           )

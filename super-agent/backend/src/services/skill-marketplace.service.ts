@@ -501,6 +501,7 @@ export class SkillMarketplaceService {
         version: '1.0.0',
         tags: [...(options.tags || []), 'marketplace', 'skills.sh'],
         metadata,
+        status: 'scanning',
       };
       skill = await skillService.createSkill(organizationId, createInput);
     }
@@ -878,6 +879,7 @@ export class SkillMarketplaceService {
               version: '1.0.0',
               tags: ['zip-upload'],
               metadata,
+              status: 'scanning',
             });
           }
 

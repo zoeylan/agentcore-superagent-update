@@ -185,6 +185,20 @@ export function AgentProfile({ agent, onConfigure, onRemove, onToggleStatus }: A
               value={agent.metrics.toolCalls!.toString()}
             />
           )}
+          {(agent.metrics.tokenUsage ?? 0) > 0 && (
+            <MetricCard
+              icon={<Activity className="w-5 h-5 text-cyan-400" />}
+              label="Token Usage"
+              value={agent.metrics.tokenUsage! >= 1000 ? `${(agent.metrics.tokenUsage! / 1000).toFixed(1)}K` : agent.metrics.tokenUsage!.toString()}
+            />
+          )}
+          {(agent.metrics.estimatedCostUsd ?? 0) > 0 && (
+            <MetricCard
+              icon={<Clock className="w-5 h-5 text-emerald-400" />}
+              label="Est. Cost"
+              value={`$${agent.metrics.estimatedCostUsd!.toFixed(2)}`}
+            />
+          )}
         </div>
       </div>
 

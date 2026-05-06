@@ -26,151 +26,7 @@ interface PublishedApp {
   author_name?: string
   tags?: string[]
   screenshots?: string[]
-  _sample?: boolean
 }
-
-// ============================================================================
-// Hardcoded sample apps
-// ============================================================================
-
-const SAMPLE_APPS: PublishedApp[] = [
-  {
-    id: 'sample-expense-tracker',
-    name: 'Expense Tracker',
-    description: 'Track team expenses with approval workflows, receipt uploads, and CSV export. Built with React + Tailwind.',
-    icon: '📊',
-    category: 'tool',
-    version: '1.2.0',
-    status: 'published',
-    published_at: new Date(Date.now() - 2 * 86400000).toISOString(),
-    metadata: {},
-    avg_rating: 4.2,
-    rating_count: 12,
-    launch_count: 142,
-    author_name: 'Alex V.',
-    tags: ['expense', 'finance', 'approval'],
-    _sample: true,
-  },
-  {
-    id: 'sample-standup-timer',
-    name: 'Standup Timer',
-    description: 'Configurable per-person countdown timer for daily standups. Tracks speaking time and sends summary to Slack.',
-    icon: '⏱️',
-    category: 'tool',
-    version: '2.0.1',
-    status: 'published',
-    published_at: new Date(Date.now() - 5 * 86400000).toISOString(),
-    metadata: {},
-    avg_rating: 4.8,
-    rating_count: 24,
-    launch_count: 89,
-    author_name: 'Sarah J.',
-    tags: ['standup', 'timer', 'agile'],
-    _sample: true,
-  },
-  {
-    id: 'sample-snake-game',
-    name: 'Snake Game',
-    description: 'Classic snake game with leaderboard. Built during a Friday hackathon. Surprisingly addictive.',
-    icon: '🐍',
-    category: 'game',
-    version: '1.0.0',
-    status: 'published',
-    published_at: new Date(Date.now() - 1 * 86400000).toISOString(),
-    metadata: {},
-    avg_rating: 3.8,
-    rating_count: 31,
-    launch_count: 203,
-    author_name: 'Mike T.',
-    tags: ['game', 'fun', 'hackathon'],
-    _sample: true,
-  },
-  {
-    id: 'sample-sales-dashboard',
-    name: 'Sales Pipeline',
-    description: 'Real-time sales pipeline dashboard with funnel visualization, deal tracking, and weekly forecast charts.',
-    icon: '💰',
-    category: 'dashboard',
-    version: '3.1.0',
-    status: 'published',
-    published_at: new Date(Date.now() - 10 * 86400000).toISOString(),
-    metadata: {},
-    avg_rating: 4.5,
-    rating_count: 18,
-    launch_count: 67,
-    author_name: 'Lisa M.',
-    tags: ['sales', 'pipeline', 'analytics'],
-    _sample: true,
-  },
-  {
-    id: 'sample-onboarding-form',
-    name: 'Employee Onboarding',
-    description: 'Multi-step onboarding form for new hires. Collects personal info, equipment preferences, and team assignments.',
-    icon: '📋',
-    category: 'form',
-    version: '1.1.0',
-    status: 'published',
-    published_at: new Date(Date.now() - 7 * 86400000).toISOString(),
-    metadata: {},
-    avg_rating: 4.0,
-    rating_count: 8,
-    launch_count: 34,
-    author_name: 'Jenny K.',
-    tags: ['hr', 'onboarding', 'form'],
-    _sample: true,
-  },
-  {
-    id: 'sample-incident-tracker',
-    name: 'Incident Commander',
-    description: 'Track production incidents with severity levels, timeline, and post-mortem templates. Integrates with PagerDuty.',
-    icon: '🚨',
-    category: 'tool',
-    version: '2.3.0',
-    status: 'published',
-    published_at: new Date(Date.now() - 14 * 86400000).toISOString(),
-    metadata: {},
-    avg_rating: 4.7,
-    rating_count: 15,
-    launch_count: 56,
-    author_name: 'Marcus O.',
-    tags: ['incident', 'ops', 'sre'],
-    _sample: true,
-  },
-  {
-    id: 'sample-retro-board',
-    name: 'Retro Board',
-    description: 'Collaborative retrospective board with columns for what went well, what to improve, and action items. Real-time sync.',
-    icon: '🔄',
-    category: 'tool',
-    version: '1.0.2',
-    status: 'published',
-    published_at: new Date(Date.now() - 3 * 86400000).toISOString(),
-    metadata: {},
-    avg_rating: 4.4,
-    rating_count: 20,
-    launch_count: 112,
-    author_name: 'David C.',
-    tags: ['retro', 'agile', 'collaboration'],
-    _sample: true,
-  },
-  {
-    id: 'sample-inventory-tool',
-    name: 'Inventory Scanner',
-    description: 'Barcode scanning inventory management tool. Track stock levels, set reorder alerts, and generate reports.',
-    icon: '📦',
-    category: 'utility',
-    version: '1.4.0',
-    status: 'published',
-    published_at: new Date(Date.now() - 20 * 86400000).toISOString(),
-    metadata: {},
-    avg_rating: 3.9,
-    rating_count: 6,
-    launch_count: 28,
-    author_name: 'Elena R.',
-    tags: ['inventory', 'warehouse', 'scanning'],
-    _sample: true,
-  },
-]
 
 // ============================================================================
 // Helpers
@@ -209,7 +65,7 @@ function AppCard({ app, onClick, isFav, onToggleFav, onDelete }: { app: Publishe
       className="bg-gray-800 border border-gray-700 rounded-xl p-4 hover:border-purple-500/50 hover:bg-gray-800/80 transition-all cursor-pointer group relative"
     >
       <div className="absolute top-3 right-3 flex items-center gap-1">
-        {!app._sample && onDelete && (
+        {onDelete && (
           <button
             onClick={e => { e.stopPropagation(); onDelete() }}
             className="p-1 rounded-lg hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
@@ -255,7 +111,6 @@ function AppCard({ app, onClick, isFav, onToggleFav, onDelete }: { app: Publishe
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           {app.author_name && <span className="text-[10px] text-gray-600">by {app.author_name}</span>}
-          {app._sample && <span className="text-[9px] px-1 py-0.5 rounded bg-yellow-600/20 text-yellow-500">SAMPLE</span>}
         </div>
         <button
           onClick={e => { e.stopPropagation(); onClick() }}
@@ -283,14 +138,13 @@ function AppListRow({ app, onClick, isFav, onToggleFav, onDelete }: { app: Publi
         <div className="flex items-center gap-2">
           <h3 className="text-white font-medium">{app.name}</h3>
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-600/20 text-purple-400 capitalize">{app.category}</span>
-          {app._sample && <span className="text-[9px] px-1 py-0.5 rounded bg-yellow-600/20 text-yellow-500">SAMPLE</span>}
         </div>
         <p className="text-sm text-gray-500 truncate">{app.description || 'No description'}</p>
       </div>
       {app.avg_rating ? <StarRating rating={app.avg_rating} count={app.rating_count || 0} /> : null}
       {app.launch_count != null && <span className="text-xs text-gray-600">{app.launch_count} runs</span>}
       <span className="text-xs text-gray-600">v{app.version}</span>
-      {!app._sample && onDelete && (
+      {onDelete && (
         <button
           onClick={e => { e.stopPropagation(); onDelete() }}
           className="p-1.5 rounded-lg text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
@@ -346,7 +200,7 @@ export function Marketplace() {
 
   // Merge API apps with samples
   const allApps = useMemo(() => {
-    const merged = [...apiApps, ...SAMPLE_APPS]
+    const merged = [...apiApps]
     // Filter by category
     let filtered = category === 'all' ? merged : merged.filter(a => a.category === category)
     // Filter by search
@@ -373,7 +227,7 @@ export function Marketplace() {
 
   // Trending = top 4 by launch count
   const trending = useMemo(() =>
-    [...apiApps, ...SAMPLE_APPS]
+    [...apiApps]
       .sort((a, b) => (b.launch_count || 0) - (a.launch_count || 0))
       .slice(0, 4),
     [apiApps]
@@ -381,7 +235,7 @@ export function Marketplace() {
 
   // Recently used (simulated — last 3 by newest)
   const recentlyUsed = useMemo(() =>
-    [...apiApps, ...SAMPLE_APPS]
+    [...apiApps]
       .sort((a, b) => new Date(b.published_at).getTime() - new Date(a.published_at).getTime())
       .slice(0, 3),
     [apiApps]
@@ -389,7 +243,7 @@ export function Marketplace() {
 
   // Favorite apps
   const favoriteApps = useMemo(() =>
-    [...apiApps, ...SAMPLE_APPS].filter(a => favorites.has(a.id)),
+    [...apiApps].filter(a => favorites.has(a.id)),
     [apiApps, favorites]
   )
 
@@ -398,7 +252,7 @@ export function Marketplace() {
   }
 
   const handleDeleteApp = useCallback(async () => {
-    if (!deleteTarget || deleteTarget._sample) return
+    if (!deleteTarget) return
     setDeleting(true)
     try {
       await restClient.delete(`/api/apps/${deleteTarget.id}`)
@@ -578,13 +432,13 @@ export function Marketplace() {
               ) : view === 'grid' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {allApps.map(app => (
-                    <AppCard key={app.id} app={app} onClick={() => handleAppClick(app)} isFav={favorites.has(app.id)} onToggleFav={() => toggleFav(app.id)} onDelete={!app._sample ? () => setDeleteTarget(app) : undefined} />
+                    <AppCard key={app.id} app={app} onClick={() => handleAppClick(app)} isFav={favorites.has(app.id)} onToggleFav={() => toggleFav(app.id)} onDelete={() => setDeleteTarget(app)} />
                   ))}
                 </div>
               ) : (
                 <div className="space-y-2">
                   {allApps.map(app => (
-                    <AppListRow key={app.id} app={app} onClick={() => handleAppClick(app)} isFav={favorites.has(app.id)} onToggleFav={() => toggleFav(app.id)} onDelete={!app._sample ? () => setDeleteTarget(app) : undefined} />
+                    <AppListRow key={app.id} app={app} onClick={() => handleAppClick(app)} isFav={favorites.has(app.id)} onToggleFav={() => toggleFav(app.id)} onDelete={() => setDeleteTarget(app)} />
                   ))}
                 </div>
               )}

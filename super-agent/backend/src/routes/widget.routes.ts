@@ -8,7 +8,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { widgetAuthService, WIDGET_SYSTEM_USER_ID } from '../services/widget-auth.service.js';
 import { supportService } from '../services/support.service.js';
 import { chatService } from '../services/chat.service.js';
-import { supportWorkflowService } from '../services/support-workflow.service.js';
+import { supportWorkflowExecutorService } from '../services/support-workflow-executor.service.js';
 import { escalationService } from '../services/escalation.service.js';
 import { prisma } from '../config/database.js';
 import { z } from 'zod';
@@ -126,39 +126,38 @@ export async function widgetRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
 
-      // Fire-and-forget: trigger workflow execution and escalation evaluation
-      supportWorkflowService.executeForMessage(auth.organizationId, {
-        message: content,
-        sessionId,
-        conversationId: conversation.id,
-        businessScopeId: undefined,
-      }).catch(() => {});
+      // Execute the customer service workflow synchronously
+      const session = await chatService.getSessionById(sessionId, auth.organizationId);
+      const scopeId = session.business_scope_id ?? undefined;
 
+      // Fire-and-forget: escalation evaluation
       escalationService.evaluateAndEscalate(conversation.id, auth.organizationId).catch(() => {});
 
       try {
-        const session = await chatService.getSessionById(sessionId, auth.organizationId);
-        const scopeId = session.business_scope_id;
+        const outcome = await supportWorkflowExecutorService.execute(auth.organizationId, {
+          message: content,
+          sessionId,
+          conversationId: conversation.id,
+          businessScopeId: scopeId,
+        });
 
-        if (!scopeId) {
-          return reply.status(503).send({
-            error: 'AI service is not configured for this session.',
-            sessionId, conversationId: conversation.id, status: 'pending_agent',
-          });
-        }
-
-        const aiResult = await chatService.processMessage({
-          sessionId, businessScopeId: scopeId, message: content,
-          organizationId: auth.organizationId, userId: WIDGET_SYSTEM_USER_ID,
+        // Reload conversation to get updated status
+        const updatedConv = await prisma.support_conversations.findFirst({
+          where: { id: conversation.id },
         });
 
         return reply.send({
-          reply: aiResult.text, sessionId,
-          conversationId: conversation.id, status: conversation.status,
+          reply: outcome.reply,
+          sessionId,
+          conversationId: conversation.id,
+          status: updatedConv?.status ?? conversation.status,
+          handoff: outcome.handoff,
+          intent: outcome.intent,
+          decisionTrail: outcome.decisionTrail,
         });
       } catch {
         return reply.status(503).send({
-          error: 'AI service is temporarily unavailable.',
+          error: 'AI service is temporarily unavailable. A support agent will assist you shortly.',
           sessionId, conversationId: conversation.id, status: 'pending_agent',
         });
       }

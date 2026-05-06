@@ -6,9 +6,8 @@
  *
  * The active runtime is determined by the AGENT_RUNTIME env var via the
  * shared agent-runtime-factory. When running under AgentCore the workspace
- * is automatically synced to/from S3 by the AgentCore runtime, so the
- * file-based flow (write scope-config.json → read it back) works in both
- * modes without special handling here.
+ * files live in S3 — the service waits for sync-back or reads directly
+ * from S3 before checking for scope-config.json.
  */
 
 import { agentRuntime } from './agent-runtime-factory.js';
@@ -17,6 +16,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { existsSync } from 'fs';
+import { config } from '../config/index.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -100,7 +100,13 @@ Skill guidelines:
 - Prefer examples and step-by-step procedures over general descriptions
 - Skills should encode domain knowledge the agent wouldn't inherently have
 
-Remember: Write the final JSON to "scope-config.json" in the current directory. This is mandatory.`;
+Remember: Write the final JSON to "scope-config.json" in the current directory. This is mandatory.
+
+CRITICAL BEHAVIORAL RULES:
+- NEVER ask clarifying questions. NEVER ask the user for more information. Work with whatever input is provided, no matter how brief or vague.
+- If the business description is short or ambiguous, make reasonable assumptions and generate a complete configuration immediately.
+- Your ONLY job is to analyze the input and produce the JSON file. Do not engage in conversation.
+- Start working immediately upon receiving the user message. Do not output preamble or ask for confirmation.`;
 
 // ---------------------------------------------------------------------------
 // Language instruction helpers
@@ -196,6 +202,71 @@ function validateScopeConfigJson(raw: string): { ok: true; config: GeneratedScop
 }
 
 // ---------------------------------------------------------------------------
+// AgentCore S3 file reading helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Read scope-config.json content, with S3 fallback for AgentCore mode.
+ *
+ * In AgentCore mode the container writes files to S3 via hooks. The Stop hook
+ * runs as fire-and-forget, so the file may not be in S3 yet when we first check.
+ * This function retries S3 reads with backoff to handle the sync delay.
+ */
+async function readConfigFile(
+  localPath: string,
+  s3Prefix: string | undefined,
+): Promise<string | null> {
+  // Fast path: file already on disk
+  if (existsSync(localPath)) {
+    return readFile(localPath, 'utf-8');
+  }
+
+  // In AgentCore mode, poll S3 with retries (container Stop hook is fire-and-forget)
+  if (config.agentRuntime === 'agentcore' && s3Prefix) {
+    const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
+    const s3Client = new S3Client({ region: config.agentcore.region });
+    const s3Key = `${s3Prefix}scope-config.json`;
+
+    // Retry up to 6 times with 5s intervals (total ~30s wait for container sync)
+    const MAX_RETRIES = 6;
+    const RETRY_INTERVAL_MS = 5_000;
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      // Check local first (sync-back may have completed)
+      if (existsSync(localPath)) {
+        return readFile(localPath, 'utf-8');
+      }
+
+      try {
+        console.log(`[scope-generator] Reading scope-config.json from S3 (attempt ${attempt + 1}/${MAX_RETRIES}): s3://${config.agentcore.workspaceS3Bucket}/${s3Key}`);
+        const response = await s3Client.send(new GetObjectCommand({
+          Bucket: config.agentcore.workspaceS3Bucket,
+          Key: s3Key,
+        }));
+        if (response.Body) {
+          const content = await response.Body.transformToString('utf-8');
+          console.log(`[scope-generator] Successfully read scope-config.json from S3 (${content.length} bytes)`);
+          return content;
+        }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        // NoSuchKey means file not yet synced — retry
+        if (errMsg.includes('NoSuchKey') || errMsg.includes('The specified key does not exist')) {
+          console.log(`[scope-generator] scope-config.json not yet in S3, waiting ${RETRY_INTERVAL_MS / 1000}s...`);
+          await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL_MS));
+          continue;
+        }
+        // Other errors — log and stop retrying
+        console.warn('[scope-generator] Failed to read scope-config.json from S3:', errMsg);
+        break;
+      }
+    }
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
@@ -254,9 +325,18 @@ export class ScopeGeneratorService {
       // Use a stable session ID so repair turns share the same conversation context
       const sessionId = `scope-gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+      // Compute S3 prefix for AgentCore mode (must match what AgentCoreAgentRuntime builds)
+      const s3Prefix = config.agentRuntime === 'agentcore'
+        ? `system/system/${sessionId}/`
+        : undefined;
+
       try {
         // ---- Initial generation ----
-        yield* agentRuntime.runConversation(
+        // Collect text output for fallback JSON extraction (in case file-based
+        // retrieval fails — e.g. AgentCore container doesn't sync to S3 in time)
+        const allTextBlocks: string[] = [];
+
+        for await (const event of agentRuntime.runConversation(
           {
             agentId: 'scope-generator',
             sessionId,
@@ -268,59 +348,60 @@ export class ScopeGeneratorService {
           },
           agentConfig,
           [], // no skills needed for generation
-        );
+        )) {
+          // Collect text and tool_use content for fallback extraction
+          if ((event.type === 'assistant' || event.type === 'result') && event.content) {
+            for (const block of event.content) {
+              if (block.type === 'text' && 'text' in block) {
+                allTextBlocks.push((block as { type: 'text'; text: string }).text);
+              }
+              // Also capture tool_use input.content — Agent writes JSON via Write tool
+              if (block.type === 'tool_use' && 'input' in block) {
+                const input = (block as { type: 'tool_use'; input: Record<string, unknown> }).input;
+                if (typeof input.content === 'string') {
+                  allTextBlocks.push(input.content);
+                }
+              }
+            }
+          }
+          yield event;
+        }
 
-        // ---- Validate & repair loop ----
+        console.log(`[scope-generator] Collected ${allTextBlocks.length} text blocks, total ${allTextBlocks.reduce((s, b) => s + b.length, 0)} chars`);
+
+        // ---- Validate: file first, then text extraction fallback ----
         let validConfig: GeneratedScopeConfig | null = null;
 
-        for (let attempt = 0; attempt <= MAX_REPAIR_ATTEMPTS; attempt++) {
-          if (!existsSync(configFilePath)) {
-            if (attempt === MAX_REPAIR_ATTEMPTS) {
-              console.error('[scope-generator] scope-config.json still not found after repair attempts');
-              break;
-            }
-            console.warn(`[scope-generator] scope-config.json not found (attempt ${attempt}), asking agent to repair...`);
-
-            yield* this.requestRepair(
-              sessionId,
-              tempWorkspace,
-              agentConfig,
-              'The file "scope-config.json" was not found in the working directory. You MUST write the complete scope configuration JSON to "scope-config.json" now. Do not output anything else — just write the file.',
-            );
-            continue;
-          }
-
-          const fileContent = await readFile(configFilePath, 'utf-8');
+        // Strategy 1: Read from file (local or S3)
+        const fileContent = await readConfigFile(configFilePath, s3Prefix);
+        if (fileContent) {
           const result = validateScopeConfigJson(fileContent);
-
           if (result.ok) {
             validConfig = result.config;
-            console.log('[scope-generator] scope-config.json validated successfully');
-            break;
+            console.log('[scope-generator] scope-config.json validated successfully (from file)');
+          } else {
+            console.warn(`[scope-generator] scope-config.json invalid: ${result.error}`);
           }
+        } else {
+          console.warn('[scope-generator] scope-config.json not found in file or S3');
+        }
 
-          // Validation failed
-          if (attempt === MAX_REPAIR_ATTEMPTS) {
-            console.error(`[scope-generator] scope-config.json still invalid after ${MAX_REPAIR_ATTEMPTS} repair attempts: ${result.error}`);
-            break;
+        // Strategy 2: Extract JSON from conversation text output
+        if (!validConfig) {
+          console.log('[scope-generator] Attempting to extract config from conversation text...');
+          const fullText = allTextBlocks.join('');
+          const extracted = this.extractConfigFromText(fullText);
+          if (extracted) {
+            const result = validateScopeConfigJson(extracted);
+            if (result.ok) {
+              validConfig = result.config;
+              console.log('[scope-generator] scope-config.json validated successfully (from text extraction)');
+            } else {
+              console.warn(`[scope-generator] Extracted JSON invalid: ${result.error}`);
+            }
+          } else {
+            console.warn('[scope-generator] Could not extract JSON from conversation text');
           }
-
-          console.warn(`[scope-generator] scope-config.json validation failed (attempt ${attempt}): ${result.error}. Asking agent to repair...`);
-
-          // Delete the broken file so the agent writes a fresh one
-          await rm(configFilePath, { force: true });
-
-          yield* this.requestRepair(
-            sessionId,
-            tempWorkspace,
-            agentConfig,
-            [
-              `The "scope-config.json" you wrote is invalid. Validation error:`,
-              `  ${result.error}`,
-              ``,
-              `Please fix the issue and write a corrected version to "scope-config.json". The file must contain ONLY valid JSON conforming to the required schema (with "scope" and "agents" fields). Do not include any markdown or extra text in the file.`,
-            ].join('\n'),
-          );
         }
 
         // Emit the validated config to the frontend
@@ -335,6 +416,80 @@ export class ScopeGeneratorService {
         rm(tempWorkspace, { recursive: true, force: true }).catch(() => {});
       }
     }
+
+  /**
+   * Extract scope config JSON from conversation text output.
+   * The agent often outputs the JSON as a tool_use content block with
+   * file_path and content fields, or inside a json code fence.
+   */
+  private extractConfigFromText(text: string): string | null {
+    if (!text || text.length === 0) return null;
+
+    // Strategy 1: Find JSON with "scope" and "agents" keys directly
+    // Look for the largest valid JSON object containing both keys
+    const candidates: string[] = [];
+
+    // Try json code fences first
+    const fenceRegex = /```(?:json)?\s*([\s\S]*?)```/g;
+    let fenceMatch;
+    while ((fenceMatch = fenceRegex.exec(text)) !== null) {
+      const content = fenceMatch[1]!.trim();
+      if (content.includes('"scope"') && content.includes('"agents"')) {
+        candidates.push(content);
+      }
+    }
+
+    // Strategy 2: Look for "content" field in tool_use blocks that contains
+    // escaped JSON with scope/agents (Agent writes file via Write tool)
+    const contentRegex = /"content"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+    let contentMatch;
+    while ((contentMatch = contentRegex.exec(text)) !== null) {
+      try {
+        const unescaped = JSON.parse(`"${contentMatch[1]}"`);
+        if (typeof unescaped === 'string' && unescaped.includes('"scope"') && unescaped.includes('"agents"')) {
+          candidates.push(unescaped);
+        }
+      } catch { /* not valid escaped string */ }
+    }
+
+    // Strategy 3: Find any JSON object with scope+agents by scanning for { ... }
+    // Use a simple brace-matching approach
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] !== '{') continue;
+      // Quick check: does the text from here contain both keys?
+      const remaining = text.slice(i, i + 50000);
+      if (!remaining.includes('"scope"') || !remaining.includes('"agents"')) continue;
+
+      let depth = 0;
+      let end = -1;
+      for (let j = i; j < text.length; j++) {
+        if (text[j] === '{') depth++;
+        else if (text[j] === '}') {
+          depth--;
+          if (depth === 0) { end = j; break; }
+        }
+      }
+      if (end > i) {
+        const candidate = text.slice(i, end + 1);
+        if (candidate.length > 100) { // skip tiny fragments
+          candidates.push(candidate);
+        }
+      }
+    }
+
+    // Try to parse each candidate, return the first valid one
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && typeof parsed === 'object' && parsed.scope && Array.isArray(parsed.agents)) {
+          console.log(`[scope-generator] Extracted valid config from text (${candidate.length} chars)`);
+          return candidate;
+        }
+      } catch { /* not valid JSON */ }
+    }
+
+    return null;
+  }
 
   /**
    * Ask the agent to repair the scope-config.json file within the same

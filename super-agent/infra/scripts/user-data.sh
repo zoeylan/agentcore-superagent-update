@@ -21,7 +21,6 @@ apt-get install -y libreoffice-core libreoffice-impress libreoffice-writer libre
 echo ">>> Installing Node.js 22..."
 curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 apt-get install -y nodejs
-npm install -g npm@latest
 
 # PostgreSQL client
 echo ">>> Installing PostgreSQL client..."
@@ -210,7 +209,11 @@ systemctl daemon-reload
 cat > /opt/super-agent/fetch-db-url.sh << 'FETCHSCRIPT'
 #!/bin/bash
 SECRET_ARN="${1:?Usage: fetch-db-url.sh <SECRET_ARN>}"
-REGION="${AWS_REGION:-us-west-2}"
+# Extract region from ARN (4th field: arn:aws:secretsmanager:<region>:...)
+REGION=$(echo "$SECRET_ARN" | cut -d: -f4)
+if [ -z "$REGION" ]; then
+  REGION="${AWS_REGION:-us-west-2}"
+fi
 SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id "$SECRET_ARN" --region "$REGION" --query SecretString --output text)
 DB_USER=$(echo "$SECRET_JSON" | jq -r '.username')
 DB_PASS=$(echo "$SECRET_JSON" | jq -r '.password')
@@ -231,14 +234,14 @@ HOST=0.0.0.0
 NODE_ENV=production
 LOG_LEVEL=info
 DATABASE_URL=CHANGE_ME
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=super-agent-redis-password
+REDIS_HOST=CHANGE_ME
+REDIS_PORT=CHANGE_ME
+REDIS_PASSWORD=CHANGE_ME
 AUTH_MODE=local
 JWT_SECRET=CHANGE_ME
-AWS_REGION=us-west-2
+AWS_REGION=CHANGE_ME
 S3_BUCKET_NAME=CHANGE_ME
-CORS_ORIGIN=*
+CORS_ORIGIN=CHANGE_ME
 CLAUDE_CODE_USE_BEDROCK=1
 CLAUDE_MODEL=claude-sonnet-4-6
 AGENT_WORKSPACE_BASE_DIR=/opt/super-agent/workspaces

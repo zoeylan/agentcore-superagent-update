@@ -46,6 +46,7 @@ import { healthRoutes } from './health.routes.js';
 import { authRoutes } from './auth.routes.js';
 import { skillsRoutes } from './skills.routes.js';
 import { skillMarketplaceRoutes } from './skill-marketplace.routes.js';
+import { skillScanningRoutes } from './skill-scanning.routes.js';
 import { avatarRoutes } from './avatarRoutes.js';
 import { workshopRoutes } from './workshop.routes.js';
 import { openapiRoutes } from './openapi.routes.js';
@@ -71,6 +72,8 @@ import { connectorRoutes } from './connectors.routes.js';
 import { supportRoutes, supportSettingsRoutes, supportKnowledgeRoutes } from './support.routes.js';
 import { widgetRoutes } from './widget.routes.js';
 import { litellmRoutes } from './litellm.routes.js';
+import { a2aRoutes } from './a2a.routes.js';
+import { auditRoutes } from './audit.routes.js';
 
 /**
  * Register all API routes on the Fastify instance.
@@ -172,6 +175,9 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   // Skill Marketplace Routes (search, detail, install from skills.sh)
   await fastify.register(skillMarketplaceRoutes, { prefix: '/api/skills/marketplace' });
 
+  // Skill Scanning Routes (LLM-powered security/compliance analysis)
+  await fastify.register(skillScanningRoutes, { prefix: '/api/skills/scanning' });
+
   // Enterprise Skills Marketplace Routes (internal catalog)
   await fastify.register(enterpriseSkillsRoutes, { prefix: '/api/skills/enterprise' });
 
@@ -269,6 +275,20 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   await fastify.register(llmProxyRoutes);
 
   // ============================================================================
+  // A2A Protocol Routes (Agent-to-Agent, API Key Authentication)
+  // ============================================================================
+
+  // External agent discovery and invocation via A2A protocol
+  await fastify.register(a2aRoutes, { prefix: '/api/a2a' });
+
+  // ============================================================================
+  // Audit Log Routes (Enterprise Compliance)
+  // ============================================================================
+
+  // Audit log query, export, and statistics (admin/owner only)
+  await fastify.register(auditRoutes, { prefix: '/api/audit-logs' });
+
+  // ============================================================================
   // Public OpenAPI Routes (API Key Authentication)
   // ============================================================================
 
@@ -294,6 +314,7 @@ export {
   authRoutes,
   skillsRoutes,
   skillMarketplaceRoutes,
+  skillScanningRoutes,
   enterpriseSkillsRoutes,
   avatarRoutes,
   workshopRoutes,

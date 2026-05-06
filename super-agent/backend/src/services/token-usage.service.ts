@@ -171,3 +171,37 @@ export async function getUserUsageLogs(
     skip: offset,
   });
 }
+
+/**
+ * Get aggregated token usage for a specific agent.
+ * Used by AgentProfile to show token consumption and cost metrics.
+ */
+export async function getAgentTokenUsage(
+  organizationId: string,
+  agentId: string,
+): Promise<{ totalTokens: number; estimatedCostUsd: number }> {
+  try {
+    const result = await prisma.$queryRaw<
+      Array<{ total_input: bigint; total_output: bigint; total_cost: number }>
+    >`
+      SELECT
+        COALESCE(SUM("input_tokens"), 0) AS total_input,
+        COALESCE(SUM("output_tokens"), 0) AS total_output,
+        COALESCE(SUM("total_cost_usd")::float, 0) AS total_cost
+      FROM "token_usage_log"
+      WHERE "organization_id" = ${organizationId}::uuid
+        AND "agent_id" = ${agentId}::uuid
+    `;
+
+    const row = result[0];
+    if (!row) return { totalTokens: 0, estimatedCostUsd: 0 };
+
+    return {
+      totalTokens: Number(row.total_input) + Number(row.total_output),
+      estimatedCostUsd: Number(row.total_cost),
+    };
+  } catch (err) {
+    console.warn('[token-usage] getAgentTokenUsage failed:', err);
+    return { totalTokens: 0, estimatedCostUsd: 0 };
+  }
+}

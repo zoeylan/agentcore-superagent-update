@@ -2,6 +2,7 @@
  * ShowcasePage — "企业Agent大赏" / Enterprise Agent Showcase.
  *
  * Displays agent capabilities organized by Industry (tabs) → Domain (sections) → Cases (cards).
+ * Includes a "我的收藏" (My Favorites) tab showing the current user's starred sessions.
  * Includes an admin panel for managing industries and domains.
  */
 
@@ -10,7 +11,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from '@/i18n'
 import {
   Star, Loader2, Play, Eye, Settings, Plus, Pencil, Trash2, X,
-  ChevronRight,
+  ChevronRight, MessageSquare, Clock, Heart,
 } from 'lucide-react'
 import { restClient } from '@/services/api/restClient'
 
@@ -48,6 +49,19 @@ interface ShowcaseIndustry {
   domains: ShowcaseDomain[]
 }
 
+interface StarredSession {
+  id: string
+  title: string | null
+  status: string
+  user_id: string
+  starred_at: string | null
+  starred_by: string | null
+  star_category: string | null
+  created_at: string
+  updated_at: string
+  business_scope?: { id: string; name: string; icon: string | null } | null
+}
+
 // ============================================================================
 // Main Page
 // ============================================================================
@@ -78,7 +92,7 @@ export function ShowcasePage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  const activeIndustry = industries.find(i => i.id === activeTab)
+  const activeIndustry = activeTab !== '__favorites__' ? industries.find(i => i.id === activeTab) : null
 
   const handleRun = (c: ShowcaseCase) => {
     const params = new URLSearchParams()
@@ -121,33 +135,45 @@ export function ShowcasePage() {
             </button>
           </div>
 
-          {/* Industry Tabs */}
-          {industries.length > 0 && (
-            <div className="flex items-center gap-1">
-              {industries.map(ind => (
-                <button
-                  key={ind.id}
-                  onClick={() => setActiveTab(ind.id)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    activeTab === ind.id
-                      ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
-                      : 'text-gray-400 hover:text-white hover:bg-gray-800 border border-transparent'
-                  }`}
-                >
-                  {ind.name}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Industry Tabs + My Favorites Tab */}
+          <div className="flex items-center gap-1">
+            {industries.map(ind => (
+              <button
+                key={ind.id}
+                onClick={() => setActiveTab(ind.id)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  activeTab === ind.id
+                    ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800 border border-transparent'
+                }`}
+              >
+                {ind.name}
+              </button>
+            ))}
+            {/* My Favorites tab */}
+            <button
+              onClick={() => setActiveTab('__favorites__')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${
+                activeTab === '__favorites__'
+                  ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-800 border border-transparent'
+              }`}
+            >
+              <Heart className="w-3.5 h-3.5" />
+              {t('showcase.myFavorites')}
+            </button>
+          </div>
         </div>
 
         {/* Content */}
         <div className="px-8 py-6">
-          {loading ? (
+          {loading && activeTab !== '__favorites__' ? (
             <div className="flex items-center justify-center py-20">
               <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
               <span className="ml-2 text-sm text-gray-500">{t('showcase.loading')}</span>
             </div>
+          ) : activeTab === '__favorites__' ? (
+            <MyFavoritesPanel />
           ) : industries.length === 0 ? (
             <div className="text-center py-20">
               <Star className="w-10 h-10 text-gray-700 mx-auto mb-3" />
@@ -171,13 +197,118 @@ export function ShowcasePage() {
       {showAdmin && (
         <AdminPanel
           industries={industries}
-          activeIndustryId={activeTab}
+          activeIndustryId={activeTab !== '__favorites__' ? activeTab : null}
           onClose={() => setShowAdmin(false)}
           onDataChanged={() => {
             loadData()
           }}
         />
       )}
+    </div>
+  )
+}
+
+// ============================================================================
+// My Favorites Panel — shows current user's starred sessions
+// ============================================================================
+
+function MyFavoritesPanel() {
+  const navigate = useNavigate()
+  const { t } = useTranslation()
+  const [sessions, setSessions] = useState<StarredSession[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const loadStarred = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await restClient.get<{ data: StarredSession[] }>('/api/chat/sessions/starred')
+      setSessions(res.data || [])
+    } catch (err) {
+      console.error('Failed to load starred sessions:', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadStarred() }, [loadStarred])
+
+  const handleUnstar = async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    try {
+      await restClient.put(`/api/chat/sessions/${sessionId}/unstar`, {})
+      setSessions(prev => prev.filter(s => s.id !== sessionId))
+    } catch (err) {
+      console.error('Failed to unstar:', err)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+        <span className="ml-2 text-sm text-gray-500">{t('showcase.loading')}</span>
+      </div>
+    )
+  }
+
+  if (sessions.length === 0) {
+    return (
+      <div className="text-center py-20">
+        <Heart className="w-10 h-10 text-gray-700 mx-auto mb-3" />
+        <p className="text-sm text-gray-500">{t('showcase.noFavorites')}</p>
+        <p className="text-xs text-gray-600 mt-1">{t('showcase.noFavoritesHint')}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-gray-500 mb-4">
+        {sessions.length} {t('showcase.favoritesCount')}
+      </p>
+      {sessions.map(session => (
+        <div
+          key={session.id}
+          onClick={() => navigate(`/chat?session=${session.id}`)}
+          className="p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-gray-700 transition-colors cursor-pointer group"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0 flex-1">
+              <MessageSquare className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
+              <div className="min-w-0 flex-1">
+                <span className="text-sm font-medium text-white block truncate">
+                  {session.title || 'Untitled chat'}
+                </span>
+                <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-500 flex-wrap">
+                  {session.business_scope && (
+                    <span className="flex items-center gap-1">
+                      {session.business_scope.icon || '📁'} {session.business_scope.name}
+                    </span>
+                  )}
+                  {session.star_category && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-yellow-500/15 text-yellow-400 text-[10px] font-medium">
+                      {session.star_category}
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {new Date(session.starred_at || session.created_at).toLocaleDateString(undefined, {
+                      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                    })}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={(e) => handleUnstar(session.id, e)}
+              className="p-1.5 rounded-lg text-yellow-400 hover:text-yellow-300 hover:bg-yellow-500/10 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0"
+              title={t('showcase.removeFavorite')}
+            >
+              <Star className="w-4 h-4" fill="currentColor" />
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

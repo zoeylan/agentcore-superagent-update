@@ -23,6 +23,8 @@ export interface AgentMetrics {
   avgResponseTime: string
   subagentInvocations?: number
   toolCalls?: number
+  tokenUsage?: number
+  estimatedCostUsd?: number
 }
 
 export interface ModelConfig {
@@ -51,6 +53,11 @@ export interface Agent {
   systemPrompt: string
   modelConfig: ModelConfig
   businessScopeId?: string  // Link to business scope
+  // A2A external access
+  a2aEnabled?: boolean
+  a2aCapabilities?: string
+  a2aExposedSkillIds?: string[]
+  registryRecordId?: string
 }
 
 export interface AgentSummary {

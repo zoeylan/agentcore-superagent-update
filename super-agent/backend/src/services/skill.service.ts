@@ -22,6 +22,8 @@ export interface CreateSkillInput {
   version?: string;
   tags?: string[];
   metadata?: Record<string, unknown>;
+  /** Override initial status. Defaults to 'active'. Use 'scanning' for external skills pending security scan. */
+  status?: string;
 }
 
 export interface SkillSummary {
@@ -33,6 +35,7 @@ export interface SkillSummary {
   status: string;
   hash_id: string;
   s3_prefix: string;
+  metadata: unknown;
 }
 
 export interface SkillForRuntime {
@@ -55,11 +58,11 @@ function generateHashId(organizationId: string, name: string): string {
 
 export class SkillService {
   async listSkills(organizationId: string): Promise<SkillSummary[]> {
-    const skills = await skillRepository.findActiveSkills(organizationId);
+    const skills = await skillRepository.findAll(organizationId);
     return skills.map(s => ({
       id: s.id, name: s.name, display_name: s.display_name,
       description: s.description, version: s.version, status: s.status,
-      hash_id: s.hash_id, s3_prefix: s.s3_prefix,
+      hash_id: s.hash_id, s3_prefix: s.s3_prefix, metadata: s.metadata,
     }));
   }
 
@@ -77,9 +80,10 @@ export class SkillService {
       name: input.name, display_name: input.display_name,
       description: input.description || null, hash_id: hashId,
       s3_bucket: SKILLS_BUCKET, s3_prefix: `skills/${hashId}/`,
-      version: input.version || '1.0.0', status: 'active',
-      tags: input.tags || [], metadata: input.metadata || {},
-    });
+      version: input.version || '1.0.0', status: input.status || 'active',
+      skill_type: 'general', tags: input.tags || [], metadata: input.metadata || {},
+      business_scope_id: null, parent_skill_id: null, owner_scope_id: null, created_by: null,
+    } as Omit<SkillEntity, 'id' | 'organization_id' | 'created_at' | 'updated_at'>);
   }
 
   async updateSkill(organizationId: string, skillId: string, updates: Partial<CreateSkillInput>): Promise<SkillEntity | null> {

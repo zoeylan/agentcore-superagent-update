@@ -2,22 +2,15 @@
  * Chat Room Routes
  * REST API endpoints for group chat room management.
  *
- * Group chat always uses the local Claude runtime (ClaudeAgentRuntime),
- * regardless of the AGENT_RUNTIME env var, to avoid AgentCore latency
- * and keep the interactive group experience responsive.
+ * All group chat messages go through the A2A Orchestrator, which
+ * routes to the best agent (single) or coordinates multi-agent
+ * collaboration. Each agent runs in its own full runtime with
+ * workspace, skills, and MCP tools.
  */
 
 import { FastifyInstance } from 'fastify';
 import { authenticate, requireModifyAccess } from '../middleware/auth.js';
 import { chatRoomService } from '../services/chat-room.service.js';
-import { ClaudeAgentRuntime } from '../services/agent-runtime-claude.js';
-import { ChatService } from '../services/chat.service.js';
-
-/**
- * Dedicated ChatService instance for group chat — always uses local Claude runtime.
- * This bypasses the global AGENT_RUNTIME setting (which may be 'agentcore').
- */
-const roomChatService = new ChatService(new ClaudeAgentRuntime());
 
 export async function chatRoomRoutes(fastify: FastifyInstance): Promise<void> {
 
@@ -197,7 +190,7 @@ export async function chatRoomRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.post<{
     Params: { roomId: string };
-    Body: { content: string; mention_agent_id?: string };
+    Body: { content: string; mention_agent_id?: string; swarm?: boolean };
   }>(
     '/:roomId/messages',
     { preHandler: [authenticate] },
@@ -206,7 +199,7 @@ export async function chatRoomRoutes(fastify: FastifyInstance): Promise<void> {
       const roomId = request.params.roomId;
       const { content, mention_agent_id } = request.body;
 
-      const { chatMessageRepository, chatSessionRepository } = await import('../repositories/chat.repository.js');
+      const { chatMessageRepository } = await import('../repositories/chat.repository.js');
       const { formatSSEEvent } = await import('../utils/sse.js');
 
       // Persist the user's original message (not the contextual prompt)
@@ -219,135 +212,111 @@ export async function chatRoomRoutes(fastify: FastifyInstance): Promise<void> {
         metadata: {},
       }, orgId);
 
-      // Route the message to the appropriate agent
-      const route = await chatRoomService.routeMessage(orgId, roomId, content, mention_agent_id);
-
-      // Resolve the scope for the target agent.
-      // In cross-scope rooms, use the agent's source_scope_id from room membership.
-      // Falls back to the session's business_scope_id.
-      const session = await chatSessionRepository.findById(roomId, orgId);
-      const { chatRoomMemberRepository: memberRepo } = await import('../repositories/chat-room-member.repository.js');
-      const members = await memberRepo.findBySession(roomId);
-      const targetMember = members.find(m => m.agent_id === route.targetAgentId);
-      const scopeId = targetMember?.source_scope_id
-        ?? targetMember?.agent.business_scope_id
-        ?? session?.business_scope_id;
-
-      if (!scopeId) {
-        return reply.status(400).send({ route, error: 'Room has no business scope' });
-      }
-
-      // Set SSE headers
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      });
-
-      // Send route decision immediately so frontend knows who's answering
-      reply.raw.write(formatSSEEvent({
-        data: JSON.stringify({ type: 'route', ...route }),
-      }));
-
-      // Build room context for the agent
-      const roomContext = await chatRoomService.buildRoomContext(orgId, roomId, route.targetAgentId);
-      const contextualMessage = `${roomContext}\n\n---\nUser message: ${content}`;
-
-      // Prepare workspace + run conversation via local Claude runtime
-      try {
-        const result = await roomChatService.prepareScopeSessionPublic(orgId, request.user!.id, {
-          businessScopeId: scopeId,
-          sessionId: roomId,
-          message: contextualMessage,
+      // ── All group chat messages go through A2A Orchestrator ─────────
+      // @mention: Orchestrator routes directly to mentioned agent (skip LLM routing)
+      // No @mention: Orchestrator decides single/multi via LLM
+      {
+        reply.raw.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
         });
 
-        const { agentConfig, skills, claudeSessionId, workspacePath, pluginPaths, mcpServers } = result;
-        const { ClaudeAgentRuntime } = await import('../services/agent-runtime-claude.js');
-        const claudeRuntime = new ClaudeAgentRuntime();
+        try {
+          const { a2aOrchestrator } = await import('../services/a2a-orchestrator.service.js');
+          const { chatRoomMemberRepository: memberRepo } = await import('../repositories/chat-room-member.repository.js');
+          const members = await memberRepo.findBySession(roomId);
 
-        const generator = claudeRuntime.runConversation(
-          {
-            agentId: agentConfig.id,
-            sessionId: roomId,
-            providerSessionId: claudeSessionId,
-            message: contextualMessage,
+          // Ensure the room session has a workspace (for file output)
+          const { chatSessionRepository } = await import('../repositories/chat.repository.js');
+          const session = await chatSessionRepository.findById(roomId, orgId);
+          const primaryScopeId = session?.business_scope_id;
+          if (primaryScopeId) {
+            try {
+              const { ChatService } = await import('../services/chat.service.js');
+              const { ClaudeAgentRuntime } = await import('../services/agent-runtime-claude.js');
+              const roomChatService = new ChatService(new ClaudeAgentRuntime());
+              await roomChatService.provisionSessionWorkspace(roomId, orgId);
+            } catch (err) {
+              console.warn('[ROOM] Failed to provision workspace:', err instanceof Error ? err.message : err);
+            }
+          }
+
+          // Build AgentEndpoint list from room members
+          const agents = members
+            .filter(m => m.is_active)
+            .map(m => ({
+              agentId: m.agent_id,
+              name: m.agent.name,
+              displayName: m.agent.display_name,
+              role: m.agent.role || 'assistant',
+              endpoint: `local://${m.agent_id}`,
+            }));
+
+          // Send swarm:started event
+          reply.raw.write(formatSSEEvent({
+            data: JSON.stringify({
+              type: 'swarm_started',
+              agents: agents.map(a => ({ id: a.agentId, name: a.displayName, role: a.role })),
+            }),
+          }));
+
+          const result = await a2aOrchestrator.orchestrate({
+            roomId,
             organizationId: orgId,
             userId: request.user!.id,
-            workspacePath,
-            scopeId,
-          },
-          agentConfig,
-          skills,
-          pluginPaths.length > 0 ? pluginPaths : undefined,
-          Object.keys(mcpServers).length > 0 ? mcpServers : undefined,
-        );
+            message: content,
+            agents,
+            mentionAgentId: mention_agent_id,
+          });
 
-        const allContentBlocks: import('../services/claude-agent.service.js').ContentBlock[] = [];
-
-        for await (const event of generator) {
-          if (event.type === 'session_start' && event.sessionId) {
-            chatSessionRepository.updateClaudeSessionId(roomId, orgId, event.sessionId).catch(() => {});
+          // Send route info so frontend can attribute the response
+          const primaryAgent = agents.find(a => result.agentsInvolved.includes(a.agentId)) ?? agents[0];
+          if (primaryAgent) {
+            reply.raw.write(formatSSEEvent({
+              data: JSON.stringify({
+                type: 'route',
+                targetAgentId: primaryAgent.agentId,
+                targetAgentName: primaryAgent.displayName,
+                confidence: 1.0,
+                reasoning: result.mode === 'single' ? `Routed to ${primaryAgent.displayName}` : `Multi-agent collaboration (${result.agentsInvolved.length} agents)`,
+                routedBy: 'auto',
+              }),
+            }));
           }
-          if (event.type === 'assistant' && event.content) {
-            allContentBlocks.push(...event.content);
-            try {
-              reply.raw.write(formatSSEEvent({
-                data: JSON.stringify({ type: 'assistant', content: event.content }),
-              }));
-            } catch { break; }
-          }
-          if (event.type === 'error') {
-            try {
-              reply.raw.write(formatSSEEvent({
-                data: JSON.stringify({ type: 'error', message: event.message }),
-              }));
-            } catch { break; }
-          }
-        }
 
-        // Extract plain text and persist AI response
-        const text = allContentBlocks
-          .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-          .map(b => b.text)
-          .join('\n');
-
-        if (text) {
-          await chatMessageRepository.create({
-            session_id: roomId,
-            type: 'ai',
-            content: text,
-            agent_id: route.targetAgentId,
-            mention_agent_id: null,
-            metadata: { routedBy: route.routedBy, confidence: route.confidence },
-          }, orgId).catch(() => {});
-        }
-
-        // Auto-distill memories from group chat conversation
-        if (allContentBlocks.length > 0) {
-          const { distillationService } = await import('../services/distillation.service.js');
-          distillationService.enqueue({
-            organizationId: orgId,
-            scopeId,
-            sessionId: roomId,
-            agentId: route.targetAgentId,
-            contentBlocks: allContentBlocks,
-            userMessage: content,
-          }).catch(() => {});
-        }
-      } catch (err) {
-        console.error(`[ROOM] Stream failed for room ${roomId}:`, err instanceof Error ? err.message : err);
-        try {
+          // Send the final synthesis as an assistant message
           reply.raw.write(formatSSEEvent({
-            data: JSON.stringify({ type: 'error', message: 'Agent failed to respond. Please try again.' }),
+            data: JSON.stringify({
+              type: 'assistant',
+              content: [{ type: 'text', text: result.finalReport }],
+            }),
           }));
+
+          // Send completion event
+          reply.raw.write(formatSSEEvent({
+            data: JSON.stringify({
+              type: 'swarm_completed',
+              rounds: result.rounds,
+              agentsInvolved: result.agentsInvolved,
+              durationMs: result.totalDurationMs,
+            }),
+          }));
+        } catch (err) {
+          console.error(`[ROOM] Swarm failed for room ${roomId}:`, err instanceof Error ? err.message : err);
+          try {
+            reply.raw.write(formatSSEEvent({
+              data: JSON.stringify({ type: 'error', message: 'Multi-agent collaboration failed. Please try again.' }),
+            }));
+          } catch { /* client gone */ }
+        }
+
+        try {
+          reply.raw.write(formatSSEEvent({ data: '[DONE]' }));
+          reply.raw.end();
         } catch { /* client gone */ }
       }
-
-      try {
-        reply.raw.write(formatSSEEvent({ data: '[DONE]' }));
-        reply.raw.end();
-      } catch { /* client gone */ }
     }
   );
 

@@ -38,6 +38,10 @@ interface ToolItem {
   installRef?: string
   /** Real skill/MCP UUID for API calls (e.g. group access). Differs from display `id`. */
   resourceId?: string
+  /** Skill status: scanning | active | quarantined | archived */
+  skillStatus?: string
+  /** Skill DB ID (for polling scan status) */
+  skillId?: string
 }
 
 /* ================================================================== */
@@ -491,10 +495,142 @@ const CATEGORY_TAB_STRIP: Record<string, string> = {
 }
 
 /* ================================================================== */
+/*  Security Report Modal                                              */
+/* ================================================================== */
+function SecurityReportModal({ skillId, skillName, open, onClose }: { skillId: string; skillName: string; open: boolean; onClose: () => void }) {
+  const [loading, setLoading] = useState(true)
+  const [summary, setSummary] = useState<{ scanned: boolean; overall_score: number; scan_types: Record<string, { scan_type: string; status: string; score: number; findings: Array<{ check: string; passed: boolean; severity: string; detail: string }>; summary: string | null }> } | null>(null)
+
+  useEffect(() => {
+    if (!open || !skillId) return
+    setLoading(true)
+    restClient.get<{ data: typeof summary }>(`/api/skills/scanning/${skillId}/summary`)
+      .then(res => setSummary(res.data))
+      .catch(() => setSummary(null))
+      .finally(() => setLoading(false))
+  }, [open, skillId])
+
+  if (!open) return null
+
+  const statusColor = (status: string) => {
+    if (status === 'passed') return 'text-green-400 bg-green-500/10'
+    if (status === 'warning') return 'text-yellow-400 bg-yellow-500/10'
+    return 'text-red-400 bg-red-500/10'
+  }
+
+  const severityColor = (severity: string) => {
+    if (severity === 'critical') return 'text-red-400'
+    if (severity === 'high') return 'text-orange-400'
+    if (severity === 'medium') return 'text-yellow-400'
+    if (severity === 'low') return 'text-blue-400'
+    return 'text-gray-400'
+  }
+
+  const scoreColor = (score: number) => {
+    if (score >= 70) return 'text-green-400'
+    if (score >= 50) return 'text-yellow-400'
+    return 'text-red-400'
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-blue-400" />
+            <h3 className="text-sm font-semibold text-white">Security Report — {skillName}</h3>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+              <span className="ml-2 text-sm text-gray-400">Loading scan results...</span>
+            </div>
+          ) : !summary || !summary.scanned ? (
+            <div className="text-center py-12">
+              <Shield className="w-8 h-8 text-gray-600 mx-auto mb-2" />
+              <p className="text-sm text-gray-500">No scan results available for this skill.</p>
+            </div>
+          ) : (
+            <>
+              {/* Overall Score */}
+              <div className="flex items-center gap-4 p-4 bg-gray-800/50 rounded-lg">
+                <div className={`text-3xl font-bold ${scoreColor(summary.overall_score)}`}>
+                  {Math.round(summary.overall_score)}
+                </div>
+                <div>
+                  <p className="text-sm text-white font-medium">Overall Score</p>
+                  <p className="text-xs text-gray-400">Average across all scan dimensions</p>
+                </div>
+              </div>
+
+              {/* Dimension Cards */}
+              {Object.entries(summary.scan_types).map(([type, result]) => (
+                <div key={type} className="border border-gray-800 rounded-lg overflow-hidden">
+                  {/* Dimension Header */}
+                  <div className="flex items-center justify-between px-4 py-3 bg-gray-800/30">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-white capitalize">{type}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${statusColor(result.status)}`}>
+                        {result.status}
+                      </span>
+                    </div>
+                    <span className={`text-sm font-bold ${scoreColor(result.score)}`}>{result.score}</span>
+                  </div>
+
+                  {/* Summary */}
+                  {result.summary && (
+                    <p className="px-4 py-2 text-xs text-gray-400 border-b border-gray-800/50">{result.summary}</p>
+                  )}
+
+                  {/* Findings */}
+                  {result.findings && result.findings.length > 0 && (
+                    <div className="px-4 py-2 space-y-1.5">
+                      {result.findings.map((f, i) => (
+                        <div key={i} className="flex items-start gap-2 text-[11px]">
+                          <span className="mt-0.5">
+                            {f.passed ? (
+                              <CheckCircle2 className="w-3 h-3 text-green-500" />
+                            ) : (
+                              <AlertCircle className={`w-3 h-3 ${severityColor(f.severity)}`} />
+                            )}
+                          </span>
+                          <div className="min-w-0">
+                            <span className="text-gray-300 font-medium">{f.check}</span>
+                            {f.detail && <p className="text-gray-500 mt-0.5">{f.detail}</p>}
+                          </div>
+                          {!f.passed && (
+                            <span className={`text-[9px] px-1 py-0.5 rounded ${severityColor(f.severity)} bg-gray-800 flex-shrink-0`}>
+                              {f.severity}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ================================================================== */
 /*  Tool Card                                                          */
 /* ================================================================== */
 function ToolCard({ tool, installing, onInstall }: { tool: ToolItem; installing?: boolean; onInstall?: (tool: ToolItem) => void }) {
   const { t } = useTranslation()
+  const [showReport, setShowReport] = useState(false)
   const Icon = tool.icon
   const categoryLabel = tool.category === 'skills' ? t('tools.skill') : tool.category === 'mcp' ? t('tools.mcp') : t('tools.plugin')
   const categoryColor = tool.category === 'skills' ? 'text-yellow-400 bg-yellow-500/10' : tool.category === 'mcp' ? 'text-blue-400 bg-blue-500/10' : 'text-violet-400 bg-violet-500/10'
@@ -571,10 +707,48 @@ function ToolCard({ tool, installing, onInstall }: { tool: ToolItem; installing?
             </div>
           )}
 
-          {tool.installed ? (
-            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-green-500/10 text-green-400">
-              {t('tools.installed')}
+          {tool.skillStatus === 'scanning' ? (
+            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />Scanning
             </span>
+          ) : tool.skillStatus === 'scan_failed' ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); onInstall?.(tool) }}
+              disabled={installing}
+              className="text-[10px] font-medium px-2.5 py-1 rounded-md bg-orange-600 hover:bg-orange-500 text-white transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {installing ? (
+                <><Loader2 className="w-3 h-3 animate-spin" />Retrying...</>
+              ) : (
+                <><AlertCircle className="w-3 h-3" />Install Again</>
+              )}
+            </button>
+          ) : tool.skillStatus === 'quarantined' ? (
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowReport(true) }}
+                className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 hover:text-blue-400 transition-colors flex items-center gap-1"
+              >
+                <Shield className="w-3 h-3" />Report
+              </button>
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 flex items-center gap-1">
+                <Shield className="w-3 h-3" />Quarantined
+              </span>
+            </div>
+          ) : tool.installed ? (
+            <div className="flex items-center gap-1.5">
+              {tool.skillId && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowReport(true) }}
+                  className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 hover:text-blue-400 transition-colors flex items-center gap-1"
+                >
+                  <Shield className="w-3 h-3" />Report
+                </button>
+              )}
+              <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-green-500/10 text-green-400">
+                {t('tools.installed')}
+              </span>
+            </div>
           ) : (
             <button
               onClick={(e) => { e.stopPropagation(); onInstall?.(tool) }}
@@ -590,6 +764,15 @@ function ToolCard({ tool, installing, onInstall }: { tool: ToolItem; installing?
           )}
         </div>
       </div>
+      {/* Security Report Modal */}
+      {tool.skillId && (
+        <SecurityReportModal
+          skillId={tool.skillId}
+          skillName={tool.name}
+          open={showReport}
+          onClose={() => setShowReport(false)}
+        />
+      )}
     </div>
   )
 }
@@ -1007,23 +1190,47 @@ export function Tools() {
   const [lastSearchedQuery, setLastSearchedQuery] = useState('')
   const [installingId, setInstallingId] = useState<string | null>(null)
   const [installedSkillNames, setInstalledSkillNames] = useState<Set<string>>(new Set())
+  /** Map of lowercase skill name → { id, status } for status tracking */
+  const [skillStatusMap, setSkillStatusMap] = useState<Map<string, { id: string; status: string }>>(new Map())
 
   // Import skill dialog
   const [showImportDialog, setShowImportDialog] = useState(false)
 
   const isMarketplaceSkillSearch = (category === 'skills' || category === 'all') && source === 'marketplace'
 
-  // Load installed skill names from the org's skill catalog
+  // Load installed skill names and statuses from the org's skill catalog
   const loadInstalledSkillNames = useCallback(async () => {
     try {
-      const res = await restClient.get<{ data: Array<{ name: string }> }>('/api/skills')
-      setInstalledSkillNames(new Set((res.data || []).map(s => s.name.toLowerCase())))
+      const res = await restClient.get<{ data: Array<{ id: string; name: string; status: string; metadata?: { installRef?: string } }> }>('/api/skills')
+      const skills = res.data || []
+      setInstalledSkillNames(new Set(skills.map(s => s.name.toLowerCase())))
+      // Key by installRef (unique per author) with fallback to name
+      const map = new Map<string, { id: string; status: string }>()
+      for (const s of skills) {
+        const ref = s.metadata?.installRef?.toLowerCase()
+        if (ref) map.set(ref, { id: s.id, status: s.status })
+        // Also key by name for non-marketplace skills (internal)
+        map.set(s.name.toLowerCase(), { id: s.id, status: s.status })
+      }
+      setSkillStatusMap(map)
     } catch { /* ignore */ }
   }, [])
 
   useEffect(() => {
     loadInstalledSkillNames()
   }, [loadInstalledSkillNames])
+
+  // Poll for scanning skills — refresh every 5s until no more scanning skills
+  useEffect(() => {
+    const hasScanning = Array.from(skillStatusMap.values()).some(s => s.status === 'scanning')
+    if (!hasScanning) return
+
+    const timer = setInterval(() => {
+      loadInstalledSkillNames()
+    }, 5000)
+
+    return () => clearInterval(timer)
+  }, [skillStatusMap, loadInstalledSkillNames])
 
   // Install a marketplace skill
   const handleInstall = useCallback(async (tool: ToolItem) => {
@@ -1140,10 +1347,16 @@ export function Tools() {
   const dedupedEnterprise = enterpriseSkills.filter(t => !staticNames.has(t.name.toLowerCase()))
 
   // Mark marketplace skills as installed if they exist in the org's skill catalog
-  const markedMarketplace = marketplaceSkills.map(t => ({
-    ...t,
-    installed: installedSkillNames.has(t.name.toLowerCase()),
-  }))
+  const markedMarketplace = marketplaceSkills.map(t => {
+    // For marketplace skills, match ONLY by installRef (unique per author/repo)
+    const info = t.installRef ? skillStatusMap.get(t.installRef.toLowerCase()) : undefined
+    return {
+      ...t,
+      installed: !!info && info.status === 'active',
+      skillStatus: info?.status,
+      skillId: info?.id,
+    }
+  })
 
   const allTools = [...STATIC_TOOLS, ...dedupedEnterprise, ...markedMarketplace]
 
@@ -1152,10 +1365,16 @@ export function Tools() {
   const useMarketplaceSearchResults = isMarketplaceSkillSearch && searchQuery.trim().length > 0
 
   // Mark search results as installed too
-  const markedSearchResults = marketSearchResults.map(t => ({
-    ...t,
-    installed: installedSkillNames.has(t.name.toLowerCase()),
-  }))
+  const markedSearchResults = marketSearchResults.map(t => {
+    // For marketplace skills, match ONLY by installRef
+    const info = t.installRef ? skillStatusMap.get(t.installRef.toLowerCase()) : undefined
+    return {
+      ...t,
+      installed: !!info && info.status === 'active',
+      skillStatus: info?.status,
+      skillId: info?.id,
+    }
+  })
 
   const filtered = useMarketplaceSearchResults
     ? markedSearchResults
@@ -1287,7 +1506,7 @@ export function Tools() {
                 <ToolCard
                   tool={tool}
                   installing={installingId === tool.id}
-                  onInstall={tool.source === 'marketplace' && !tool.installed ? handleInstall : undefined}
+                  onInstall={tool.source === 'marketplace' && (!tool.installed || tool.skillStatus === 'scan_failed') ? handleInstall : undefined}
                 />
               </div>
             ))}

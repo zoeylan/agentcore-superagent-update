@@ -17,6 +17,10 @@ interface FormState {
   systemPrompt: string
   scope: string[]
   tools: Tool[]
+  // A2A external access
+  a2aEnabled: boolean
+  a2aCapabilities: string
+  a2aExposedSkillIds: string[]
 }
 
 interface ToastState {
@@ -57,6 +61,9 @@ export function AgentConfigurator() {
     systemPrompt: '',
     scope: [],
     tools: [],
+    a2aEnabled: false,
+    a2aCapabilities: '',
+    a2aExposedSkillIds: [],
   })
 
   // Load agent data
@@ -82,6 +89,9 @@ export function AgentConfigurator() {
           systemPrompt: '',
           scope: [],
           tools: [],
+          a2aEnabled: false,
+          a2aCapabilities: '',
+          a2aExposedSkillIds: [],
         })
         setIsLoading(false)
         return
@@ -105,6 +115,9 @@ export function AgentConfigurator() {
           systemPrompt: loadedAgent.systemPrompt || '',
           scope: loadedAgent.scope || [],
           tools: loadedAgent.tools || [],
+          a2aEnabled: loadedAgent.a2aEnabled ?? false,
+          a2aCapabilities: loadedAgent.a2aCapabilities ?? '',
+          a2aExposedSkillIds: loadedAgent.a2aExposedSkillIds ?? [],
         })
       } else {
         setError('Agent not found')
@@ -241,6 +254,9 @@ export function AgentConfigurator() {
       systemPrompt: form.systemPrompt,
       scope: form.scope,
       tools: form.tools,
+      a2aEnabled: form.a2aEnabled,
+      a2aCapabilities: form.a2aCapabilities,
+      a2aExposedSkillIds: form.a2aExposedSkillIds,
     })
 
     setIsSaving(false)
@@ -644,6 +660,91 @@ export function AgentConfigurator() {
               </div>
             </div>
           </FormField>
+
+          {/* A2A External Access Section */}
+          {!isCreateMode && (
+            <>
+              <SectionHeader title="External Access (A2A)" />
+
+              <FormField label="Allow external systems to call this Agent">
+                <div className="space-y-4">
+                  {/* Toggle */}
+                  <div className="flex items-center justify-between p-3 bg-gray-800/50 border border-gray-700 rounded-lg">
+                    <div>
+                      <p className="text-sm text-white">Enable A2A Protocol</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Register this Agent to AgentCore Registry for external discovery and invocation
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleInputChange('a2aEnabled' as keyof FormState, (!form.a2aEnabled) as any)}
+                      className={`relative w-11 h-6 rounded-full transition-colors ${
+                        form.a2aEnabled ? 'bg-blue-600' : 'bg-gray-600'
+                      }`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                        form.a2aEnabled ? 'translate-x-5' : ''
+                      }`} />
+                    </button>
+                  </div>
+
+                  {/* A2A Config (shown when enabled) */}
+                  {form.a2aEnabled && (
+                    <div className="space-y-3 pl-1">
+                      {/* Capabilities description */}
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">Capabilities Description (for external discovery)</label>
+                        <textarea
+                          value={form.a2aCapabilities}
+                          onChange={(e) => handleInputChange('a2aCapabilities' as keyof FormState, e.target.value as any)}
+                          rows={3}
+                          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:border-blue-500 outline-none transition-colors text-sm resize-none"
+                          placeholder="e.g., Handle customer complaints, check order status, process refunds"
+                        />
+                      </div>
+
+                      {/* Exposed skills checkboxes */}
+                      {form.tools.length > 0 && (
+                        <div>
+                          <label className="block text-xs text-gray-400 mb-1.5">Skills to expose externally</label>
+                          <div className="space-y-1.5">
+                            {form.tools.map(tool => {
+                              const isExposed = form.a2aExposedSkillIds.includes(tool.id)
+                              return (
+                                <label key={tool.id} className="flex items-center gap-2.5 p-2 bg-gray-800/30 border border-gray-700/50 rounded-lg cursor-pointer hover:bg-gray-800/60 transition-colors">
+                                  <input
+                                    type="checkbox"
+                                    checked={isExposed}
+                                    onChange={() => {
+                                      const next = isExposed
+                                        ? form.a2aExposedSkillIds.filter(id => id !== tool.id)
+                                        : [...form.a2aExposedSkillIds, tool.id]
+                                      handleInputChange('a2aExposedSkillIds' as keyof FormState, next as any)
+                                    }}
+                                    className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span className="text-sm text-gray-300">{tool.name}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Info box */}
+                      <div className="p-3 bg-blue-900/10 border border-blue-500/20 rounded-lg">
+                        <p className="text-xs text-blue-400">
+                          When enabled, this Agent will be registered to AWS AgentCore Registry.
+                          External systems can discover it via semantic search and invoke it through the A2A protocol endpoint.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </FormField>
+            </>
+          )}
         </div>
       </div>
     </div>

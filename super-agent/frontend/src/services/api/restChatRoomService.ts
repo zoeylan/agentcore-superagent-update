@@ -59,6 +59,15 @@ export interface RoomMessage {
   agent_id: string | null;
   mention_agent_id: string | null;
   metadata: Record<string, unknown>;
+  collaboration_meta?: {
+    sourceAgentId: string;
+    sourceAgentName: string;
+    targetAgentId?: string;
+    targetAgentName?: string;
+    messageType: 'delegation' | 'report' | 'question' | 'synthesis';
+    round: number;
+    swarmSessionId?: string;
+  } | null;
   created_at: string;
 }
 

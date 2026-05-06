@@ -75,6 +75,7 @@ model organizations {
   support_metrics_daily      support_metrics_daily[]
   response_templates         response_templates[]
   business_hours             business_hours[]
+  audit_logs                 audit_logs[]
 
   @@index([slug])
   @@index([plan_type])
@@ -212,6 +213,12 @@ model agents {
   model_config      Json     @default("{}")
   origin            String   @default("scope_generation") @db.VarChar(50)
   is_shared         Boolean  @default(false)
+  // A2A external access
+  a2a_enabled       Boolean  @default(false)
+  a2a_capabilities  String?
+  a2a_exposed_skills String[] @default([])
+  registry_record_id String?  @db.VarChar(100)
+  registry_record_arn String?
   created_at        DateTime @default(now()) @db.Timestamptz
   updated_at        DateTime @default(now()) @updatedAt @db.Timestamptz
 
@@ -229,6 +236,7 @@ model agents {
   @@index([status])
   @@index([name])
   @@index([origin])
+  @@index([a2a_enabled])
   @@index([created_at(sort: Desc)])
   @@index([organization_id, business_scope_id])
 }
@@ -257,12 +265,13 @@ model skills {
   created_at        DateTime @default(now()) @db.Timestamptz
   updated_at        DateTime @default(now()) @updatedAt @db.Timestamptz
 
-  organization       organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  parent_skill       skills?              @relation("SkillFork", fields: [parent_skill_id], references: [id], onDelete: SetNull)
-  forked_copies      skills[]             @relation("SkillFork")
-  agent_skills       agent_skills[]
-  skill_marketplace  skill_marketplace[]
-  skill_group_access skill_group_access[]
+  organization        organizations         @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  parent_skill        skills?               @relation("SkillFork", fields: [parent_skill_id], references: [id], onDelete: SetNull)
+  forked_copies       skills[]              @relation("SkillFork")
+  agent_skills        agent_skills[]
+  skill_marketplace   skill_marketplace[]
+  skill_group_access  skill_group_access[]
+  skill_scan_results  skill_scan_results[]
 
   @@unique([organization_id, hash_id], name: "unique_skill_hash_per_org")
   @@unique([organization_id, name], name: "unique_skill_name_per_org")
@@ -473,6 +482,7 @@ model chat_sessions {
   starred_at        DateTime? @db.Timestamptz
   starred_by        String?   @db.Uuid
   star_category     String?   @db.VarChar(50)
+  swarm_mode        Boolean   @default(false)
   created_at        DateTime  @default(now()) @db.Timestamptz
   updated_at        DateTime  @default(now()) @updatedAt @db.Timestamptz
 
@@ -505,6 +515,7 @@ model chat_messages {
   agent_id         String?  @db.Uuid // which agent sent this (type=agent)
   mention_agent_id String?  @db.Uuid // which agent was @mentioned (type=user)
   metadata         Json     @default("{}") // routing info, confidence, etc.
+  collaboration_meta Json?  @db.JsonB // swarm collaboration metadata (source→target, round, type)
   created_at       DateTime @default(now()) @db.Timestamptz
 
   organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
@@ -1018,6 +1029,10 @@ model scope_memories {
   category          String   @default("lesson")
   tags              String[] @default([])
   is_pinned         Boolean  @default(false)
+  visibility        String   @default("scope") @db.VarChar(20)
+  // 'scope': visible to all users (agent knowledge, business rules)
+  // 'user': visible only to creator (personal preferences, patterns)
+  // 'session': visible only within originating session
   created_by        String?  @db.Uuid
   created_at        DateTime @default(now()) @db.Timestamptz
   updated_at        DateTime @default(now()) @updatedAt @db.Timestamptz
@@ -1033,6 +1048,8 @@ model scope_memories {
   @@index([category])
   @@index([business_scope_id, is_pinned])
   @@index([created_at(sort: Desc)])
+  @@index([business_scope_id, visibility])
+  @@index([business_scope_id, created_by, visibility])
 }
 
 // ============================================================================
@@ -2013,4 +2030,56 @@ model business_hours {
 
   @@index([organization_id])
   @@index([is_active])
+}
+
+// ============================================================================
+// Skill Scan Results Table - LLM-powered security/compliance scanning
+// ============================================================================
+model skill_scan_results {
+  id          String   @id @default(uuid()) @db.Uuid
+  skill_id    String   @db.Uuid
+  scan_type   String   @db.VarChar(32) // security | compliance | compatibility | license
+  status      String   @default("pending") @db.VarChar(20) // pending | running | passed | warning | failed
+  score       Float    @default(0)
+  findings    Json     @default("[]")
+  summary     String?
+  scanned_at  DateTime @default(now()) @db.Timestamptz
+
+  skill skills @relation(fields: [skill_id], references: [id], onDelete: Cascade)
+
+  @@index([skill_id])
+  @@index([scan_type])
+  @@index([scanned_at(sort: Desc)])
+  @@index([skill_id, scan_type])
+}
+
+// ============================================================================
+// Audit Logs Table — enterprise compliance (SOC 2, GDPR, 等保)
+// ============================================================================
+model audit_logs {
+  id              String   @id @default(uuid()) @db.Uuid
+  organization_id String   @db.Uuid
+  actor_id        String   @db.Uuid
+  actor_email     String?
+  action          String   @db.VarChar(100) // e.g. agent.create, scope.member.add
+  resource_type   String   @db.VarChar(50) // e.g. agent, scope, workflow, knowledge
+  resource_id     String?  @db.Uuid
+  resource_name   String?  // human-readable name of the affected resource
+  scope_id        String?  @db.Uuid
+  metadata        Json?    @db.JsonB // additional context (old/new values, params, etc.)
+  ip_address      String?  @db.VarChar(45)
+  user_agent      String?
+  created_at      DateTime @default(now()) @db.Timestamptz
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  @@index([organization_id])
+  @@index([actor_id])
+  @@index([action])
+  @@index([resource_type])
+  @@index([scope_id])
+  @@index([created_at(sort: Desc)])
+  @@index([organization_id, created_at(sort: Desc)])
+  @@index([organization_id, action])
+  @@index([organization_id, actor_id, created_at(sort: Desc)])
 }

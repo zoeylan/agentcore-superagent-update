@@ -122,7 +122,7 @@ export class SuperAgentStack extends cdk.Stack {
       securityGroups: [dbSg],
       databaseName: 'super_agent',
       credentials: rds.Credentials.fromGeneratedSecret('superagent', {
-        secretName: 'super-agent/db-credentials',
+        secretName: `${id}/db-credentials`,
       }),
       allocatedStorage: 20,
       maxAllocatedStorage: 50,
@@ -196,9 +196,12 @@ export class SuperAgentStack extends cdk.Stack {
     });
     avatarBucket.grantReadWrite(role);
 
+    // Stack-scoped bucket prefix (lowercase, S3 requires it)
+    const bucketPrefix = id.toLowerCase();
+
     // Skills bucket (for agent skill definitions)
     const skillsBucket = new s3.Bucket(this, 'SkillsBucket', {
-      bucketName: `super-agent-skills-${this.account}`,
+      bucketName: `${bucketPrefix}-skills-${this.account}`,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -207,7 +210,7 @@ export class SuperAgentStack extends cdk.Stack {
 
     // Workspace bucket (for AgentCore S3 sync)
     const workspaceBucket = new s3.Bucket(this, 'WorkspaceBucket', {
-      bucketName: `super-agent-workspace-${this.account}`,
+      bucketName: `${bucketPrefix}-workspace-${this.account}`,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -334,12 +337,29 @@ export class SuperAgentStack extends cdk.Stack {
         ],
       });
 
-      // Add API/WS behavior → EC2 origin
-      const ec2Origin = new origins.HttpOrigin(`ec2-origin.${domainName}`, {
-        // This will be overridden by post-deploy to use the actual EIP
-        // For now, use a placeholder — the deploy script patches it
+      // Add API/WS behaviors → EC2 origin (port 80, Nginx proxies to backend)
+      // Note: The origin domain is a placeholder; after CDK deploy, the EIP
+      // is known and CloudFront origin must be updated via console or CLI
+      // to point to the actual EC2 public IP.
+      const ec2Origin = new origins.HttpOrigin(`ec2-placeholder.${domainName}`, {
         protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
         httpPort: 80,
+      });
+
+      // /api/* → EC2 (no caching, pass all headers)
+      distribution.addBehavior('/api/*', ec2Origin, {
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+      });
+
+      // /ws/* → EC2 (WebSocket upgrade needs all headers forwarded)
+      distribution.addBehavior('/ws/*', ec2Origin, {
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
       });
 
       // Route53 ALIAS → CloudFront

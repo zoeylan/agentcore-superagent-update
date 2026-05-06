@@ -252,6 +252,9 @@ if [ -f /opt/super-agent/.env ]; then
   # Start from existing production .env (strip comments/blanks for key lookup)
   cp /opt/super-agent/.env /tmp/new-env
 
+  # Replace placeholder values (left by UserData bootstrap)
+  sed -i '/=CHANGE_ME$/d' /tmp/new-env
+
   # Append any base keys that are missing from production
   while IFS= read -r line; do
     [[ "\$line" =~ ^#.*$ ]] && continue
@@ -367,8 +370,8 @@ set -euo pipefail
 cd /opt/super-agent/backend
 ln -sf /opt/super-agent/.env .env
 
-echo "  npm ci..."
-npm ci --production=false
+echo "  npm install..."
+npm install
 
 echo "  prisma generate..."
 npx prisma generate
@@ -395,6 +398,12 @@ if [ "$AGENT_COUNT" -gt "0" ] 2>/dev/null; then
   echo "  (Seed skipped: $AGENT_COUNT agents already exist)"
 else
   npx tsx prisma/seed.ts 2>/dev/null || echo "  (Seed failed or already seeded)"
+
+  # Set default password for seed admin user (local auth mode)
+  echo "  Setting admin default password..."
+  ADMIN_HASH=$(node -e 'require("bcryptjs").hash("Admin1234!", 10).then(h => process.stdout.write(h))')
+  psql "$PSQL_URL" -c "UPDATE profiles SET password_hash = '${ADMIN_HASH}' WHERE username = 'admin@example.com' AND password_hash IS NULL;" 2>/dev/null || true
+  echo "  Admin login: admin@example.com / Admin1234!"
 fi
 
 echo "  Restarting backend..."

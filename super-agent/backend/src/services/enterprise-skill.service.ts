@@ -262,6 +262,19 @@ export class EnterpriseSkillService {
 
     await enterpriseSkillRepository.incrementInstallCount(marketplaceId);
 
+    // Auto-sync: bind the installed skill to the session's scope so
+    // future sessions under the same scope automatically include it.
+    try {
+      await skillService.bindSkillToScope(
+        organizationId,
+        entry.skill.id,
+        session.business_scope_id!,
+      );
+      console.log(`[enterprise-skill] Skill "${entry.skill.name}" auto-synced to scope ${session.business_scope_id}`);
+    } catch (syncErr) {
+      console.warn(`[enterprise-skill] Failed to auto-sync skill "${entry.skill.name}" to scope:`, syncErr);
+    }
+
     // In agentcore mode, sync the installed skill to S3 and the container
     // so the workspace file tree can see it immediately.
     const { config: appConfig } = await import('../config/index.js');

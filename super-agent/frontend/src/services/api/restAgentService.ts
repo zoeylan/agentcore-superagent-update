@@ -26,6 +26,14 @@ interface ApiAgent {
   scope: unknown[];
   system_prompt: string | null;
   model_config: Record<string, unknown>;
+  // A2A fields
+  a2a_enabled?: boolean;
+  a2a_capabilities?: string | null;
+  a2a_exposed_skills?: string[];
+  registry_record_id?: string | null;
+  // Token usage (enriched by backend)
+  tokenUsage?: number;
+  estimatedCostUsd?: number;
   created_at: string;
   updated_at: string;
 }
@@ -42,12 +50,17 @@ function mapApiAgentToAgent(apiAgent: ApiAgent): Agent {
     department: mapBusinessScopeToDepartment(apiAgent.business_scope_id),
     avatar: apiAgent.avatar || apiAgent.display_name.charAt(0).toUpperCase(),
     status: apiAgent.status as Agent['status'],
-    metrics: parseMetrics(apiAgent.metrics),
+    metrics: parseMetrics(apiAgent.metrics, apiAgent.tokenUsage, apiAgent.estimatedCostUsd),
     tools: parseTools(apiAgent.tools),
     scope: parseScope(apiAgent.scope),
     systemPrompt: apiAgent.system_prompt || '',
     modelConfig: parseModelConfig(apiAgent.model_config),
     businessScopeId: apiAgent.business_scope_id || undefined,
+    // A2A
+    a2aEnabled: apiAgent.a2a_enabled ?? false,
+    a2aCapabilities: apiAgent.a2a_capabilities ?? undefined,
+    a2aExposedSkillIds: apiAgent.a2a_exposed_skills ?? [],
+    registryRecordId: apiAgent.registry_record_id ?? undefined,
   };
 }
 
@@ -68,6 +81,10 @@ function mapAgentToApiRequest(agent: Partial<Agent>): Record<string, unknown> {
   if (agent.systemPrompt !== undefined) request.system_prompt = agent.systemPrompt;
   if (agent.modelConfig !== undefined) request.model_config = agent.modelConfig;
   if ('businessScopeId' in agent) request.business_scope_id = agent.businessScopeId || null;
+  // A2A fields
+  if (agent.a2aEnabled !== undefined) request.a2a_enabled = agent.a2aEnabled;
+  if (agent.a2aCapabilities !== undefined) request.a2a_capabilities = agent.a2aCapabilities;
+  if (agent.a2aExposedSkillIds !== undefined) request.a2a_exposed_skills = agent.a2aExposedSkillIds;
   
   return request;
 }
@@ -76,7 +93,7 @@ function mapBusinessScopeToDepartment(businessScopeId: string | null): Departmen
   return (businessScopeId || '__independent__') as Department;
 }
 
-function parseMetrics(metrics: unknown): AgentMetrics {
+function parseMetrics(metrics: unknown, tokenUsage?: number, estimatedCostUsd?: number): AgentMetrics {
   if (typeof metrics === 'object' && metrics !== null) {
     const m = metrics as Record<string, unknown>;
     return {
@@ -85,6 +102,8 @@ function parseMetrics(metrics: unknown): AgentMetrics {
       avgResponseTime: typeof m.avgResponseTime === 'string' ? m.avgResponseTime : '0s',
       subagentInvocations: typeof m.subagentInvocations === 'number' ? m.subagentInvocations : undefined,
       toolCalls: typeof m.toolCalls === 'number' ? m.toolCalls : undefined,
+      tokenUsage: tokenUsage ?? (typeof m.tokenUsage === 'number' ? m.tokenUsage : undefined),
+      estimatedCostUsd: estimatedCostUsd ?? (typeof m.estimatedCostUsd === 'number' ? m.estimatedCostUsd : undefined),
     };
   }
   return { taskCount: 0, responseRate: 0, avgResponseTime: '0s' };

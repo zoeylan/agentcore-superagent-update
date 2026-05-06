@@ -110,6 +110,13 @@ const envSchema = z.object({
   // OpenClaw on AgentCore (when AGENT_RUNTIME=openclaw)
   OPENCLAW_AGENTCORE_RUNTIME_ARN: z.string().optional(),
 
+  // AgentCore Registry (agent/skill/MCP registration + A2A + semantic search)
+  AGENTCORE_REGISTRY_ENABLED: z.string().optional(),
+  AGENTCORE_REGISTRY_REGION: z.string().optional(),
+  AGENTCORE_REGISTRY_ID: z.string().optional(),
+  AGENTCORE_REGISTRY_ARN: z.string().optional(),
+  AGENTCORE_REGISTRY_AUTO_SYNC: z.string().optional(),
+
   // Vector Memory (optional — pgvector + Bedrock Nova Embed semantic memory layer)
   VECTOR_MEMORY_ENABLED: z.string().optional(),
 
@@ -231,6 +238,13 @@ export const config = {
     backendApiKey: env.AGENTCORE_BACKEND_API_KEY,
     workspaceS3Bucket: env.AGENTCORE_WORKSPACE_S3_BUCKET,
     region: env.AWS_REGION,
+    registry: {
+      enabled: env.AGENTCORE_REGISTRY_ENABLED === 'true' || env.AGENTCORE_REGISTRY_ENABLED === '1',
+      region: env.AGENTCORE_REGISTRY_REGION || env.AWS_REGION,
+      defaultRegistryId: env.AGENTCORE_REGISTRY_ID,
+      defaultRegistryArn: env.AGENTCORE_REGISTRY_ARN,
+      autoSync: env.AGENTCORE_REGISTRY_AUTO_SYNC === 'true' || env.AGENTCORE_REGISTRY_AUTO_SYNC === '1',
+    },
   },
 
   litellm: {

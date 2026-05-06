@@ -7,7 +7,9 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { skillMarketplaceService } from '../services/skill-marketplace.service.js';
 import { chatService } from '../services/chat.service.js';
 import { workspaceManager } from '../services/workspace-manager.js';
+import { skillService } from '../services/skill.service.js';
 import { authenticate } from '../middleware/auth.js';
+import { triggerAsyncScan } from '../services/skill-scanning.service.js';
 
 interface SearchQuery { Querystring: { q: string } }
 interface DetailQuery { Querystring: { ref: string } }
@@ -110,6 +112,25 @@ export async function skillMarketplaceRoutes(fastify: FastifyInstance): Promise<
             result.localPath,
           );
 
+          // Auto-sync: bind the installed skill to the session's scope so
+          // future sessions under the same scope automatically include it.
+          try {
+            await skillService.bindSkillToScope(
+              request.user!.orgId,
+              result.skillId,
+              session.business_scope_id,
+            );
+            request.log.info(
+              { skillId: result.skillId, scopeId: session.business_scope_id },
+              'Skill auto-synced to scope definition',
+            );
+          } catch (syncErr) {
+            request.log.warn(
+              { err: syncErr, skillId: result.skillId, scopeId: session.business_scope_id },
+              'Failed to auto-sync skill to scope (non-blocking)',
+            );
+          }
+
           // In agentcore mode, also write skill files directly to the container
           const { config: appConfig } = await import('../config/index.js');
           if (appConfig.agentRuntime === 'agentcore') {
@@ -186,6 +207,9 @@ export async function skillMarketplaceRoutes(fastify: FastifyInstance): Promise<
       }
     }
 
+    // Trigger async security scan (fire-and-forget, never blocks install)
+    triggerAsyncScan(result.skillId);
+
     return reply.status(201).send({ data: result });
   });
 
@@ -230,6 +254,9 @@ export async function skillMarketplaceRoutes(fastify: FastifyInstance): Promise<
       });
     }
 
+    // Trigger async security scan (fire-and-forget, never blocks install)
+    triggerAsyncScan(result.skillId);
+
     return reply.status(201).send({ data: result });
   });
 
@@ -260,6 +287,11 @@ export async function skillMarketplaceRoutes(fastify: FastifyInstance): Promise<
         fileName,
         userId: request.user!.id,
       });
+
+      // Trigger async security scan for each installed skill
+      for (const skill of result.skills) {
+        triggerAsyncScan(skill.skillId);
+      }
 
       return reply.status(201).send({ data: result });
     } catch (err) {
