@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { TranslationProvider } from '@/i18n'
 import { AppShell, ErrorBoundary, ToastProvider, ProtectedRoute, SkillMarketplaceBrowser, AIScopeGenerator, SkillWorkshop } from '@/components'
 import { Dashboard, Chat, WorkflowEditor, Agents, Tools, AgentConfigurator, TaskAuditLog, TaskExecutionCenter, MCPConfigurator, KnowledgeManager, InfrastructureConfigurator, Login, CreateBusinessScope, Marketplace, AppRunner } from '@/pages'
+import { KnowledgeBaseDrive } from '@/pages/KnowledgeBaseDrive'
 import { StarredSessions } from '@/pages/StarredSessions'
 import { ShowcasePage } from '@/pages/ShowcasePage'
 import { Settings } from '@/pages/Settings'
@@ -50,6 +51,7 @@ function AppContent() {
             <Route path="/config/skills" element={<SkillMarketplaceBrowser />} />
             <Route path="/config/rest-api" element={<div className="p-6 text-white">{t('config.restApi')}</div>} />
             <Route path="/config/knowledge" element={<KnowledgeManager />} />
+            <Route path="/knowledge" element={<KnowledgeBaseDrive />} />
             <Route path="/config/framework" element={<InfrastructureConfigurator />} />
             <Route path="/apps" element={<Marketplace />} />
             <Route path="/apps/:id" element={<AppRunner />} />

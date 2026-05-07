@@ -16,6 +16,8 @@ export interface SessionState {
   isSending: boolean
   streamHandle: ChatStreamHandle | null
   error: string | null
+  /** Error code from the backend (e.g. 'QUOTA_EXCEEDED') for specialized UI handling */
+  errorCode: string | null
 }
 
 type Listener = () => void
@@ -50,6 +52,7 @@ class SessionStreamManager {
         isSending: false,
         streamHandle: null,
         error: null,
+        errorCode: null,
       }
       this.sessions.set(sessionId, state)
     }
@@ -157,6 +160,7 @@ class SessionStreamManager {
           const s = this.sessions.get(sessionId)
           if (s) {
             s.error = event.message || 'Stream error'
+            s.errorCode = event.code || null
             // If the session/scope was not found (stale localStorage), clear the error
             // message so the UI can prompt the user to re-select a scope
             if (event.code === 'HTTP_ERROR' && event.message?.includes('not found')) {
@@ -345,6 +349,7 @@ class SessionStreamManager {
     const state = this.sessions.get(sessionId)
     if (state) {
       state.error = null
+      state.errorCode = null
       this.notify()
     }
   }

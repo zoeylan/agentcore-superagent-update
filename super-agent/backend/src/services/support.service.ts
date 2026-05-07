@@ -82,6 +82,7 @@ export class SupportService {
       message: string;
       channelType?: string;
       priority?: string;
+      businessScopeId?: string;
     },
   ) {
     // 1. Create or find customer profile
@@ -99,6 +100,7 @@ export class SupportService {
         user_id: userId,
         status: 'idle',
         context: { support: true },
+        ...(data.businessScopeId ? { business_scope_id: data.businessScopeId } : {}),
       },
     });
 

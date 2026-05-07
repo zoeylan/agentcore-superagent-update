@@ -66,7 +66,6 @@ export function AgentCard({ agent, scopeName, isSelected, onClick }: AgentCardPr
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 text-[10px] text-gray-500">
           <span>{agent.metrics.taskCount} calls</span>
-          <span>{agent.metrics.responseRate}%</span>
         </div>
         {scopeName && (
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/50 text-gray-400 truncate max-w-[80px]">

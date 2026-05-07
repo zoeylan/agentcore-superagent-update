@@ -10,6 +10,7 @@ import { agentService } from '../services/agent.service.js';
 import { skillService } from '../services/skill.service.js';
 import { avatarService } from '../services/avatarService.js';
 import { authenticate } from '../middleware/auth.js';
+import { enforceTokenQuota } from '../middleware/token-quota.js';
 import type { ConversationEvent } from '../services/claude-agent.service.js';
 
 function formatSSEEvent(payload: { event?: string; data: string }): string {
@@ -35,7 +36,7 @@ export async function scopeGeneratorRoutes(fastify: FastifyInstance): Promise<vo
    * POST /api/business-scopes/generate
    * Stream AI-generated scope configuration via SSE.
    */
-  fastify.post<GenerateBody>('/generate', { preHandler: [authenticate] }, async (request: FastifyRequest<GenerateBody>, reply: FastifyReply) => {
+  fastify.post<GenerateBody>('/generate', { preHandler: [authenticate, enforceTokenQuota] }, async (request: FastifyRequest<GenerateBody>, reply: FastifyReply) => {
     const { description, language } = request.body;
     if (!description || description.trim().length === 0) {
       return reply.status(400).send({ error: 'Business description is required', code: 'MISSING_DESCRIPTION' });

@@ -129,6 +129,20 @@ const envSchema = z.object({
   SALESFORCE_OAUTH_CLIENT_ID: z.string().optional(),
   SALESFORCE_OAUTH_CLIENT_SECRET: z.string().optional(),
   OAUTH_REDIRECT_BASE_URL: z.string().optional(), // e.g. https://app.example.com
+
+  // InsForge Backend-as-a-Service (shared instance for app backends)
+  INSFORGE_HOST: z.string().optional().default('localhost'),
+  INSFORGE_PORT_APP: z.string().optional().default('17130').transform(Number),
+  INSFORGE_PORT_AUTH: z.string().optional().default('17131').transform(Number),
+  INSFORGE_PORT_POSTGREST: z.string().optional().default('15430').transform(Number),
+  INSFORGE_PORT_POSTGRES: z.string().optional().default('15432').transform(Number),
+  INSFORGE_PORT_DENO: z.string().optional().default('17133').transform(Number),
+  INSFORGE_API_KEY: z.string().optional().default(''),
+  INSFORGE_PG_USER: z.string().optional().default('postgres'),
+  INSFORGE_PG_PASSWORD: z.string().optional().default('postgres'),
+  INSFORGE_PG_DB: z.string().optional().default('insforge'),
+  INSFORGE_ENABLED: z.string().optional().default('false'),
+  INSFORGE_JWT_SECRET: z.string().optional().default(''),
 });
 
 function loadConfig(): z.infer<typeof envSchema> {
@@ -277,6 +291,21 @@ export const config = {
       clientSecret: env.SALESFORCE_OAUTH_CLIENT_SECRET ?? '',
     },
     redirectBaseUrl: env.OAUTH_REDIRECT_BASE_URL ?? `http://localhost:${env.PORT}`,
+  },
+
+  insforge: {
+    enabled: env.INSFORGE_ENABLED === 'true' || env.INSFORGE_ENABLED === '1',
+    host: env.INSFORGE_HOST,
+    portApp: env.INSFORGE_PORT_APP,
+    portAuth: env.INSFORGE_PORT_AUTH,
+    portPostgrest: env.INSFORGE_PORT_POSTGREST,
+    portPostgres: env.INSFORGE_PORT_POSTGRES,
+    portDeno: env.INSFORGE_PORT_DENO,
+    apiKey: env.INSFORGE_API_KEY,
+    pgUser: env.INSFORGE_PG_USER,
+    pgPassword: env.INSFORGE_PG_PASSWORD,
+    pgDb: env.INSFORGE_PG_DB,
+    jwtSecret: env.INSFORGE_JWT_SECRET,
   },
 
   logLevel: env.LOG_LEVEL,

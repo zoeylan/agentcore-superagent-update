@@ -13,6 +13,12 @@ import {
   getUserUsage,
   getUserUsageLogs,
 } from '../services/token-usage.service.js';
+import {
+  getUserQuotaStatus,
+  setUserQuotaOverride,
+  getUserQuotaOverrides,
+  PLAN_QUOTAS,
+} from '../services/token-quota.service.js';
 
 interface MonthQuery {
   Querystring: { month?: string };
@@ -83,6 +89,69 @@ export async function tokenUsageRoutes(fastify: FastifyInstance): Promise<void> 
       const offset = request.query.offset ? parseInt(request.query.offset, 10) : 0;
       const rows = await getUserUsageLogs(request.user!.orgId, request.params.userId, limit, offset);
       return reply.send({ data: rows });
+    },
+  );
+
+  // ==========================================================================
+  // Quota Management Endpoints
+  // ==========================================================================
+
+  /** GET /api/token-usage/quota/me — current user's quota status */
+  fastify.get(
+    '/quota/me',
+    { preHandler: [authenticate] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const status = await getUserQuotaStatus(request.user!.orgId, request.user!.id);
+      return reply.send({ data: status });
+    },
+  );
+
+  /** GET /api/token-usage/quota/plans — available plan quotas */
+  fastify.get(
+    '/quota/plans',
+    { preHandler: [authenticate] },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      return reply.send({ data: PLAN_QUOTAS });
+    },
+  );
+
+  /** GET /api/token-usage/quota/overrides — all per-user overrides (Admin/Owner) */
+  fastify.get(
+    '/quota/overrides',
+    { preHandler: [authenticate, requireRole('owner', 'admin')] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const overrides = await getUserQuotaOverrides(request.user!.orgId);
+      return reply.send({ data: overrides });
+    },
+  );
+
+  /** PUT /api/token-usage/quota/users/:userId — set per-user quota override (Admin/Owner) */
+  fastify.put<{ Params: { userId: string }; Body: { maxTokensPerMonth?: number; maxCostPerMonth?: number } }>(
+    '/quota/users/:userId',
+    { preHandler: [authenticate, requireRole('owner', 'admin')] },
+    async (request, reply) => {
+      const { userId } = request.params;
+      const { maxTokensPerMonth, maxCostPerMonth } = request.body ?? {};
+
+      await setUserQuotaOverride(request.user!.orgId, userId, {
+        maxTokensPerMonth,
+        maxCostPerMonth,
+      });
+
+      const status = await getUserQuotaStatus(request.user!.orgId, userId);
+      return reply.send({ data: status });
+    },
+  );
+
+  /** DELETE /api/token-usage/quota/users/:userId — remove per-user override (Admin/Owner) */
+  fastify.delete<{ Params: { userId: string } }>(
+    '/quota/users/:userId',
+    { preHandler: [authenticate, requireRole('owner', 'admin')] },
+    async (request, reply) => {
+      const { userId } = request.params;
+      await setUserQuotaOverride(request.user!.orgId, userId, null);
+      const status = await getUserQuotaStatus(request.user!.orgId, userId);
+      return reply.send({ data: status });
     },
   );
 }

@@ -68,6 +68,7 @@ export function TestWidget({ scopeId, scopeName, apiKeyPrefix, apiKey, onClose }
           message: '(session initialized)',
           channelType: 'web_widget',
           priority: 'medium',
+          businessScopeId: scopeId,
         }
       )
 

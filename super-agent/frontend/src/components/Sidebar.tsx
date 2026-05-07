@@ -9,6 +9,7 @@ import {
   FolderKanban,
   Star,
   Headphones,
+  Database,
 } from 'lucide-react'
 import type { NavigationPage } from '@/types'
 import { useTranslation } from '@/i18n'
@@ -58,6 +59,12 @@ const navItems: NavItemConfig[] = [
     path: '/tools',
   },
   {
+    id: 'knowledge',
+    icon: <Database className="w-5 h-5" />,
+    tooltipKey: 'nav.knowledge',
+    path: '/knowledge',
+  },
+  {
     id: 'apps',
     icon: <Rocket className="w-5 h-5" />,
     tooltipKey: 'nav.apps',
@@ -95,6 +102,7 @@ export function Sidebar({ onAvatarClick, isAdminMenuOpen }: SidebarProps) {
     if (path.startsWith('/agents')) return 'agents'
     if (path.startsWith('/projects')) return 'projects'
     if (path.startsWith('/tools')) return 'tools'
+    if (path.startsWith('/knowledge')) return 'knowledge'
     if (path.startsWith('/apps')) return 'apps'
     if (path.startsWith('/support')) return 'support'
     if (path.startsWith('/starred') || path.startsWith('/showcase')) return 'starred'

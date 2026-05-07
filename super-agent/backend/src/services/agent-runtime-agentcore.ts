@@ -13,6 +13,7 @@
 import { config } from '../config/index.js';
 import type { AgentRuntime, AgentRuntimeOptions } from './agent-runtime.js';
 import type { ConversationEvent, AgentConfig, ContentBlock, MCPServerSDKConfig } from './claude-agent.service.js';
+import { createToken } from '../middleware/auth.js';
 import type { SkillForWorkspace } from './workspace-manager.js';
 import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
 import { createReadStream, statSync, createWriteStream } from 'fs';
@@ -134,6 +135,15 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
       mcp_servers: serializableMcpServers,
       workspace_s3_bucket: this.workspaceBucket,
       workspace_s3_prefix: s3Prefix,
+      // Backend connectivity for RAG and other API calls from within the container
+      backend_api_url: config.agentcore.backendApiUrl || process.env.PUBLIC_API_URL || undefined,
+      // Generate a short-lived token so the container can authenticate API calls (e.g. RAG search)
+      backend_api_key: createToken({
+        userId: options.userId,
+        email: 'agent-internal@system',
+        organizationId: options.organizationId,
+        role: 'member',
+      }),
     });
 
     console.log(`[agentcore-runtime] S3 workspace: s3://${this.workspaceBucket}/${s3Prefix}`);
@@ -324,6 +334,9 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
       '.tox', '.mypy_cache', '.pytest_cache', '.ruff_cache',
       '.next', '.nuxt', '.turbo', '.cache', '.parcel-cache',
       'bower_components', '.gradle', 'target', '.cargo',
+      // Skip documents directory — RAG uses API calls, not local files.
+      // Uploading thousands of document files would be slow and wasteful.
+      'documents',
     ]);
 
     // Phase 1: Collect all files to upload

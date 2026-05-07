@@ -1835,6 +1835,84 @@ export const translations: TranslationData = {
     cn: '调用次数'
   },
 
+  // Token Quota
+  'tokenQuota.title': {
+    en: 'Monthly Token Quota',
+    cn: '月度 Token 配额'
+  },
+  'tokenQuota.unlimited': {
+    en: 'Unlimited',
+    cn: '无限制'
+  },
+  'tokenQuota.unlimitedDesc': {
+    en: 'Your plan has no token usage limits.',
+    cn: '您的套餐没有 Token 用量限制。'
+  },
+  'tokenQuota.used': {
+    en: 'used',
+    cn: '已使用'
+  },
+  'tokenQuota.warningApproaching': {
+    en: 'You are approaching your monthly token limit. Consider upgrading your plan.',
+    cn: '您即将达到月度 Token 上限，请考虑升级套餐。'
+  },
+  'tokenQuota.warningExceeded': {
+    en: 'Monthly token quota exceeded. New requests will be blocked until next month.',
+    cn: '月度 Token 配额已用尽，新请求将被拒绝，下月自动重置。'
+  },
+  'tokenQuota.exceededTitle': {
+    en: 'Token quota exceeded',
+    cn: 'Token 配额已用尽'
+  },
+  'tokenQuota.exceededMessage': {
+    en: 'You have reached your monthly token usage limit.',
+    cn: '您已达到本月 Token 用量上限。'
+  },
+  'tokenQuota.contactAdmin': {
+    en: 'Contact your admin to increase your quota or wait until next month.',
+    cn: '请联系管理员提升配额，或等待下月自动重置。'
+  },
+  'tokenQuota.manageTitle': {
+    en: 'User Token Limits',
+    cn: '用户 Token 限额管理'
+  },
+  'tokenQuota.manageHint': {
+    en: 'Set monthly token limits per user. Supports shorthand: 5M, 500K.',
+    cn: '为每个用户设置月度 Token 上限。支持简写：5M、500K。'
+  },
+  'tokenQuota.colUser': {
+    en: 'User',
+    cn: '用户'
+  },
+  'tokenQuota.colUsed': {
+    en: 'Used This Month',
+    cn: '本月已用'
+  },
+  'tokenQuota.colLimit': {
+    en: 'Monthly Limit',
+    cn: '月度限额'
+  },
+  'tokenQuota.colProgress': {
+    en: 'Usage',
+    cn: '用量'
+  },
+  'tokenQuota.colActions': {
+    en: 'Actions',
+    cn: '操作'
+  },
+  'tokenQuota.editLimit': {
+    en: 'Edit limit',
+    cn: '编辑限额'
+  },
+  'tokenQuota.resetToDefault': {
+    en: 'Reset to plan default',
+    cn: '恢复为套餐默认值'
+  },
+  'tokenQuota.noMembers': {
+    en: 'No active members found.',
+    cn: '没有找到活跃成员。'
+  },
+
   // Error Boundary
   'error.title': {
     en: 'Something went wrong',

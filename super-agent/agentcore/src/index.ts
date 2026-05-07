@@ -71,6 +71,14 @@ async function handleInvocations(
     createGitBaseline();
   }
 
+  // --- Set backend connectivity env vars for skills (e.g. knowledge-search) ---
+  if (payload.backend_api_url) {
+    process.env.API_BASE_URL = payload.backend_api_url;
+  }
+  if (payload.backend_api_key) {
+    process.env.AUTH_TOKEN = payload.backend_api_key;
+  }
+
   // --- SSE streaming response ---
   // S3 sync is now handled by SDK hooks in agent-runner.ts:
   //   PostToolUse (Write|Edit) → incremental file sync

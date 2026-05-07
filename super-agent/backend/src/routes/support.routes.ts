@@ -45,7 +45,7 @@ interface DraftPublishRequest { Params: { id: string }; Body: { question?: strin
 interface DistillRequest { Body: { hours?: number } }
 interface GapReportRequest { Querystring: { days?: string } }
 interface SubmitSurveyRequest { Body: { conversationId: string; rating: number; comment?: string } }
-interface CreateConvRequest { Body: { customerName: string; customerEmail?: string; message: string; channelType?: string; priority?: string } }
+interface CreateConvRequest { Body: { customerName: string; customerEmail?: string; message: string; channelType?: string; priority?: string; businessScopeId?: string } }
 interface WidgetMessageRequest { Params: { id: string }; Body: { content: string; sessionId: string } }
 
 // ============================================================================
@@ -74,6 +74,7 @@ export async function supportRoutes(fastify: FastifyInstance): Promise<void> {
         message: z.string().min(1),
         channelType: z.string().optional(),
         priority: z.string().optional(),
+        businessScopeId: z.string().uuid().optional(),
       }), request.body);
 
       const result = await supportService.createConversationWithMessage(

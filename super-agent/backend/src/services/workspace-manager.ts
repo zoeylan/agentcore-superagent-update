@@ -149,6 +149,99 @@ export class WorkspaceManager {
   }
 
   // =========================================================================
+  // RAG skill helpers
+  // =========================================================================
+
+  /**
+   * Resolve the backend URL that the agent can use to call back to the API.
+   * - In local (claude) mode: localhost
+   * - In agentcore/openclaw mode: the configured external backend URL
+   */
+  private resolveBackendUrl(): string {
+    if (config.agentRuntime === 'agentcore' || config.agentRuntime === 'openclaw') {
+      // AgentCore containers cannot reach localhost — use the external backend URL
+      const externalUrl = config.agentcore.backendApiUrl
+        || process.env.PUBLIC_API_URL
+        || process.env.API_BASE_URL;
+      if (externalUrl) return externalUrl;
+      console.warn('[workspace-manager] AgentCore mode but no AGENTCORE_BACKEND_API_URL configured — RAG skill will use localhost (likely broken in container)');
+    }
+    return `http://localhost:${process.env.PORT || 3001}`;
+  }
+
+  /**
+   * Build the knowledge-search skill markdown content.
+   * Includes auth instructions so the agent can authenticate API calls.
+   * Supports both knowledge_base_ids (new) and scope_id (legacy fallback).
+   */
+  private buildRagSkillContent(backendUrl: string, opts: { knowledgeBaseIds?: string[]; scopeId?: string }): string {
+    const isRemote = config.agentRuntime === 'agentcore' || config.agentRuntime === 'openclaw';
+
+    // Determine query parameter
+    let queryParam: string;
+    if (opts.knowledgeBaseIds && opts.knowledgeBaseIds.length > 0) {
+      queryParam = `knowledge_base_ids=${opts.knowledgeBaseIds.join(',')}`;
+    } else if (opts.scopeId) {
+      queryParam = `scope_id=${opts.scopeId}`;
+    } else {
+      return ''; // No knowledge source configured
+    }
+
+    const lines = [
+      '# Knowledge Search',
+      '',
+      'Use this skill to search the knowledge base for relevant document passages.',
+      'This performs semantic similarity search — much more accurate than grep for finding relevant information.',
+      '',
+      '## When to Use',
+      '- User asks about specific policies, procedures, or regulations',
+      '- User needs information that might be in uploaded documents',
+      '- You need to cite or reference specific document content',
+      '- Grep/ripgrep returns too many or irrelevant results',
+      '',
+      '## How to Use',
+      '',
+    ];
+
+    if (isRemote) {
+      // In AgentCore mode, the agent needs to use curl/fetch with auth header
+      lines.push(
+        'Run a shell command to call the RAG API:',
+        '',
+        '```bash',
+        `curl -s -H "Authorization: Bearer $AUTH_TOKEN" "${backendUrl}/api/rag/search?${queryParam}&q={URL_ENCODED_QUERY}&top_k=5"`,
+        '```',
+        '',
+        'The `AUTH_TOKEN` environment variable is pre-configured with a valid authentication token.',
+        '',
+      );
+    } else {
+      // Local mode — use WebFetch (no auth needed as it goes through localhost)
+      lines.push(
+        `Use the WebFetch tool to call: ${backendUrl}/api/rag/search?${queryParam}&q={URL_ENCODED_QUERY}&top_k=5`,
+        '',
+      );
+    }
+
+    lines.push(
+      '## Response Format',
+      'JSON with a `data` array. Each result contains:',
+      '- `filename`: source document name',
+      '- `content`: relevant text passage (~500 tokens)',
+      '- `similarity`: relevance score (0-1, higher is better)',
+      '- `chunkIndex`: position within the document',
+      '',
+      '## Tips',
+      '- Use natural language queries, not keywords',
+      '- If the first search is not specific enough, refine your query',
+      '- Always cite the source filename when using retrieved information',
+      '',
+    );
+
+    return lines.join('\n');
+  }
+
+  // =========================================================================
   // Session workspace provisioning
   // =========================================================================
 
@@ -219,44 +312,37 @@ export class WorkspaceManager {
       console.log(`Loaded built-in skills for session ${sessionId}: ${builtinCopied.join(', ')}`);
     }
 
-    // Generate RAG knowledge-search skill if enabled and scope has document groups
+    // Generate RAG knowledge-search skill if enabled and scope has knowledge bases or document groups
     const { isRagEnabled } = await import('./rag/document-indexer.service.js');
-    if (isRagEnabled() && docGroups.length > 0) {
+    const { knowledgeBaseService } = await import('./knowledge-base.service.js');
+    const kbIds = await knowledgeBaseService.getKnowledgeBaseIdsForScope(scope.id);
+    const hasKnowledgeSources = docGroups.length > 0 || kbIds.length > 0;
+
+    if (isRagEnabled() && hasKnowledgeSources) {
       const ragSkillPath = join(skillsDir, 'knowledge-search.md');
-      const backendUrl = `http://localhost:${process.env.PORT || 3001}`;
-      const ragSkillContent = [
-        '# Knowledge Search',
-        '',
-        'Use this skill to search the knowledge base for relevant document passages.',
-        'This performs semantic similarity search — much more accurate than grep for finding relevant information.',
-        '',
-        '## When to Use',
-        '- User asks about specific policies, procedures, or regulations',
-        '- User needs information that might be in uploaded documents',
-        '- You need to cite or reference specific document content',
-        '- Grep/ripgrep returns too many or irrelevant results',
-        '',
-        '## How to Use',
-        `Use the WebFetch tool to call: ${backendUrl}/api/rag/search?scope_id=${scope.id}&q={URL_ENCODED_QUERY}&top_k=5`,
-        '',
-        '## Response Format',
-        'JSON with a `data` array. Each result contains:',
-        '- `filename`: source document name',
-        '- `content`: relevant text passage (~500 tokens)',
-        '- `similarity`: relevance score (0-1, higher is better)',
-        '- `chunkIndex`: position within the document',
-        '',
-        '## Tips',
-        '- Use natural language queries, not keywords',
-        '- If the first search is not specific enough, refine your query',
-        '- Always cite the source filename when using retrieved information',
-        '',
-      ].join('\n');
-      await writeFile(ragSkillPath, ragSkillContent, 'utf-8');
+      const backendUrl = this.resolveBackendUrl();
+      const ragSkillContent = this.buildRagSkillContent(backendUrl, {
+        knowledgeBaseIds: kbIds.length > 0 ? kbIds : undefined,
+        scopeId: kbIds.length === 0 ? scope.id : undefined,
+      });
+      if (ragSkillContent) {
+        await writeFile(ragSkillPath, ragSkillContent, 'utf-8');
+      }
     }
 
     // Install plugins (git clone) — also parallelized internally
     const pluginPaths = await this.installPlugins(workspacePath, scope.plugins ?? []);
+
+    // Inject InsForge app backend MCP configs (if any apps in this scope have backends)
+    try {
+      const { agentAppDataResolver } = await import('./agent-app-data-resolver.js');
+      const injected = await agentAppDataResolver.injectIntoWorkspace(workspacePath, orgId, scope.id);
+      if (injected > 0) {
+        console.log(`[workspace] Injected ${injected} InsForge app backend MCP config(s) for scope ${scope.id}`);
+      }
+    } catch (err) {
+      console.warn('[workspace] Failed to inject InsForge MCP configs:', err instanceof Error ? err.message : err);
+    }
 
     // Write manifest
     const now = new Date().toISOString();
@@ -376,37 +462,19 @@ export class WorkspaceManager {
     const skillsDir = join(workspacePath, '.claude', 'skills');
     const ragSkillPath = join(skillsDir, 'knowledge-search.md');
     const { isRagEnabled } = await import('./rag/document-indexer.service.js');
-    if (isRagEnabled() && docGroups.length > 0) {
-      const backendUrl = `http://localhost:${process.env.PORT || 3001}`;
-      const ragSkillContent = [
-        '# Knowledge Search',
-        '',
-        'Use this skill to search the knowledge base for relevant document passages.',
-        'This performs semantic similarity search — much more accurate than grep for finding relevant information.',
-        '',
-        '## When to Use',
-        '- User asks about specific policies, procedures, or regulations',
-        '- User needs information that might be in uploaded documents',
-        '- You need to cite or reference specific document content',
-        '- Grep/ripgrep returns too many or irrelevant results',
-        '',
-        '## How to Use',
-        `Use the WebFetch tool to call: ${backendUrl}/api/rag/search?scope_id=${scope.id}&q={URL_ENCODED_QUERY}&top_k=5`,
-        '',
-        '## Response Format',
-        'JSON with a `data` array. Each result contains:',
-        '- `filename`: source document name',
-        '- `content`: relevant text passage (~500 tokens)',
-        '- `similarity`: relevance score (0-1, higher is better)',
-        '- `chunkIndex`: position within the document',
-        '',
-        '## Tips',
-        '- Use natural language queries, not keywords',
-        '- If the first search is not specific enough, refine your query',
-        '- Always cite the source filename when using retrieved information',
-        '',
-      ].join('\n');
-      await writeFile(ragSkillPath, ragSkillContent, 'utf-8');
+    const { knowledgeBaseService } = await import('./knowledge-base.service.js');
+    const kbIds = await knowledgeBaseService.getKnowledgeBaseIdsForScope(scope.id);
+    const hasKnowledgeSources = docGroups.length > 0 || kbIds.length > 0;
+
+    if (isRagEnabled() && hasKnowledgeSources) {
+      const backendUrl = this.resolveBackendUrl();
+      const ragSkillContent = this.buildRagSkillContent(backendUrl, {
+        knowledgeBaseIds: kbIds.length > 0 ? kbIds : undefined,
+        scopeId: kbIds.length === 0 ? scope.id : undefined,
+      });
+      if (ragSkillContent) {
+        await writeFile(ragSkillPath, ragSkillContent, 'utf-8');
+      }
     } else {
       // Remove stale RAG skill if no longer applicable
       await rm(ragSkillPath, { force: true }).catch(() => {});

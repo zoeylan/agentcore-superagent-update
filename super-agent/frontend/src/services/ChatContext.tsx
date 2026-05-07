@@ -26,6 +26,8 @@ export interface ChatSessionState {
   isLoading: boolean
   isSending: boolean
   error: string | null
+  /** Error code from backend (e.g. 'QUOTA_EXCEEDED') for specialized UI handling */
+  errorCode: string | null
 }
 
 export interface ChatContextType extends ChatSessionState {
@@ -146,7 +148,9 @@ export function ChatProvider({ children, initialSessionId, initialSop, initialAg
   const isSending = managerState?.isSending ?? false
   // Merge manager-level errors with local errors
   const managerError = managerState?.error ?? null
+  const managerErrorCode = managerState?.errorCode ?? null
   const effectiveError = error || managerError
+  const effectiveErrorCode = error ? null : managerErrorCode
 
   // Set agent in REST service when it changes
   useEffect(() => {
@@ -482,6 +486,7 @@ export function ChatProvider({ children, initialSessionId, initialSop, initialAg
     isLoading,
     isSending,
     error: effectiveError,
+    errorCode: effectiveErrorCode,
     sendMessage,
     stopGeneration,
     setActiveSop,

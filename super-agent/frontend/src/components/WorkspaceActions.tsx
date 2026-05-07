@@ -59,9 +59,25 @@ export function WorkspaceActions({ sessionId, refreshKey }: WorkspaceActionsProp
     if (!sessionId) { setApps([]); return }
     setDismissed(false)
 
-    restClient.get<{ apps: DetectedApp[] }>(`/api/chat/sessions/${sessionId}/workspace/detect-apps`)
-      .then(res => setApps(res.apps))
-      .catch(() => setApps([]))
+    const detect = () =>
+      restClient.get<{ apps: DetectedApp[] }>(`/api/chat/sessions/${sessionId}/workspace/detect-apps`)
+        .then(res => {
+          setApps(res.apps)
+          return res.apps.length > 0
+        })
+        .catch(() => { setApps([]); return false })
+
+    detect()
+
+    // Poll every 3s until an app is detected (max 10 attempts)
+    let attempts = 0
+    const interval = setInterval(async () => {
+      attempts++
+      const found = await detect()
+      if (found || attempts >= 10) clearInterval(interval)
+    }, 3000)
+
+    return () => clearInterval(interval)
   }, [sessionId, refreshKey])
 
   // Focus input when entering edit mode
@@ -74,7 +90,12 @@ export function WorkspaceActions({ sessionId, refreshKey }: WorkspaceActionsProp
 
   /** Get the display name for an app, respecting user edits. */
   const getAppName = useCallback((app: DetectedApp) => {
-    return customNames[app.folder] || app.name || (app.folder === '.' ? 'Root app' : app.folder)
+    if (customNames[app.folder]) return customNames[app.folder]
+    if (app.name && !['app', 'my-app', 'vite-project', 'Root app'].includes(app.name)) return app.name
+    // Fallback: generate a friendly name from folder
+    if (app.folder === '.') return '我的应用'
+    // Capitalize folder name
+    return app.folder.charAt(0).toUpperCase() + app.folder.slice(1).replace(/-/g, ' ')
   }, [customNames])
 
   const startEditing = useCallback((app: DetectedApp) => {

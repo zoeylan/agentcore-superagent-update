@@ -56,6 +56,7 @@ import { schedulesRoutes } from './schedules.routes.js';
 import { integrationRoutes } from './integrations.routes.js';
 import { appsRoutes } from './apps.routes.js';
 import { appDataRoutes } from './appData.routes.js';
+import { appBackendRoutes } from './appBackend.routes.js';
 import { enterpriseSkillsRoutes, enterpriseSkillPublishRoutes } from './enterprise-skills.routes.js';
 import { imChannelAdminRoutes, imWebhookRoutes } from './im.routes.js';
 import { scopeMemoryRoutes } from './scope-memory.routes.js';
@@ -74,6 +75,7 @@ import { widgetRoutes } from './widget.routes.js';
 import { litellmRoutes } from './litellm.routes.js';
 import { a2aRoutes } from './a2a.routes.js';
 import { auditRoutes } from './audit.routes.js';
+import { knowledgeBaseRoutes } from './knowledge-base.routes.js';
 
 /**
  * Register all API routes on the Fastify instance.
@@ -229,6 +231,9 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   // RAG Routes (semantic document search)
   await fastify.register(ragRoutes, { prefix: '/api/rag' });
 
+  // Knowledge Base Routes (independent knowledge management)
+  await fastify.register(knowledgeBaseRoutes, { prefix: '/api/knowledge-bases' });
+
   // User Group Routes (RBAC for skills and MCP servers)
   await fastify.register(userGroupRoutes, { prefix: '/api/user-groups' });
 
@@ -244,6 +249,7 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   // Published Apps / Marketplace Routes
   await fastify.register(appsRoutes, { prefix: '/api/apps' });
   await fastify.register(appDataRoutes, { prefix: '/api/apps' });
+  await fastify.register(appBackendRoutes, { prefix: '/api/apps' });
 
   // Data Connector Routes (credentials, connectors, scope bindings)
   await fastify.register(connectorRoutes, { prefix: '/api/data-connectors' });

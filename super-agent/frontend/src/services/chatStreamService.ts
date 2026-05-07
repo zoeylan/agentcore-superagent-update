@@ -391,11 +391,12 @@ export function streamChat(
       if (!response.ok) {
         const errorBody = await response.json().catch(() => ({}));
         const errorMessage = errorBody.error || `Request failed with status ${response.status}`;
+        const errorCode = errorBody.code || 'HTTP_ERROR';
         callbacks.onError?.({
           type: 'error',
-          code: 'HTTP_ERROR',
+          code: errorCode,
           message: errorMessage,
-          suggested_action: 'Please try again',
+          suggested_action: errorBody.details?.reason || 'Please try again',
         });
         rejectSessionId!(new Error(errorMessage));
         return;

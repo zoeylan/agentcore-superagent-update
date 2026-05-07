@@ -282,21 +282,26 @@ export const RestChatService = {
   },
 
   /**
-   * Clears chat history for a session
+   * Clears chat history for a session.
+   * Always uses the explicitly provided sessionId to avoid accidentally
+   * deleting the wrong session when currentSessionId points elsewhere.
    */
   async clearHistory(sessionId: string): Promise<void> {
     try {
-      const validSessionId = currentSessionId || sessionId;
-      
-      if (!validSessionId || !validSessionId.match(/^[0-9a-f-]{36}$/i)) {
+      if (!sessionId || !sessionId.match(/^[0-9a-f-]{36}$/i)) {
         return;
       }
 
-      await restClient.delete(`/api/chat/sessions/${validSessionId}`);
-      currentSessionId = null;
+      await restClient.delete(`/api/chat/sessions/${sessionId}`);
+      // If we just deleted the active session, clear the pointer
+      if (currentSessionId === sessionId) {
+        currentSessionId = null;
+      }
     } catch (error) {
       if (error instanceof ServiceError && error.code === 'NOT_FOUND') {
-        currentSessionId = null;
+        if (currentSessionId === sessionId) {
+          currentSessionId = null;
+        }
         return;
       }
       throw new ServiceError('Failed to clear chat history', 'UNKNOWN');

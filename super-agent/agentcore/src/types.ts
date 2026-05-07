@@ -23,6 +23,10 @@ export interface AgentPayload {
   workspace_s3_bucket?: string;
   /** S3 prefix — workspace files are at s3://{bucket}/{prefix}{relativePath} */
   workspace_s3_prefix?: string;
+  /** Backend API URL for RAG and other API calls from within the container */
+  backend_api_url?: string;
+  /** Backend API key/token for authenticating API calls */
+  backend_api_key?: string;
 }
 
 // ---------------------------------------------------------------------------

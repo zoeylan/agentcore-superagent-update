@@ -11,6 +11,7 @@ import type { FileNode } from '@/components/WorkspaceExplorer'
 import { SessionHistoryPanel } from '@/components/chat/SessionHistoryPanel'
 import { SaveToMemoryModal } from '@/components/chat/SaveToMemoryModal'
 import { WorkspaceActions } from '@/components/WorkspaceActions'
+import { ArtifactListPanel } from '@/components/chat/ArtifactListPanel'
 import { ChatProvider, ChatContext } from '@/services/ChatContext'
 import { AgentService } from '@/services/agentService'
 import { BusinessScopeService, type BusinessScope } from '@/services/businessScopeService'
@@ -132,7 +133,11 @@ function FileViewerTab({ path, sessionId }: { path: string; sessionId: string })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
-  const [mode, setMode] = useState<'view' | 'edit' | 'preview'>('view')
+  const [mode, setMode] = useState<'view' | 'edit' | 'preview'>(() => {
+    // Default to preview mode for markdown files
+    const fileExt = getFileExtension(path)
+    return PREVIEWABLE_EXTENSIONS.has(fileExt) ? 'preview' : 'view'
+  })
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [binaryBlob, setBinaryBlob] = useState<Blob | null>(null)
   const [excelData, setExcelData] = useState<{ sheetNames: string[]; sheets: Record<string, string[][]> } | null>(null)
@@ -1686,6 +1691,7 @@ function ChatInterfaceContent() {
     isLoading,
     isSending,
     error,
+    errorCode,
     sendMessage,
     stopGeneration,
     setSelectedAgent,
@@ -1742,17 +1748,21 @@ function ChatInterfaceContent() {
     prevSending.current = isSending
   }, [isSending])
 
-  // Also refresh session list when a new backend session is created
+  // Also refresh session list and workspace actions when a new backend session is created
   const prevBackendSessionId = useRef(backendSessionId)
   useEffect(() => {
     if (backendSessionId && backendSessionId !== prevBackendSessionId.current) {
       setSessionRefreshKey(k => k + 1)
+      setWsRefreshKey(k => k + 1)
     }
     prevBackendSessionId.current = backendSessionId
   }, [backendSessionId])
 
   // Resizable workspace panel
   const [panelWidth, setPanelWidth] = useState(288) // 18rem ≈ 288px
+  const [workspaceMode, setWorkspaceMode] = useState<'artifacts' | 'files'>('artifacts')
+  // When a file is being previewed, collapse side panels for a clean left-chat / right-preview layout
+  const [previewingFile, setPreviewingFile] = useState<{ path: string; name: string } | null>(null)
 
   // Tab state: 'chat' is always present, file tabs are added dynamically
   const [fileTabs, setFileTabs] = useState<FileTab[]>([])
@@ -1761,27 +1771,19 @@ function ChatInterfaceContent() {
   const [showCreateRoom, setShowCreateRoom] = useState(false)
 
   const handleFileOpen = useCallback((path: string, name: string) => {
-    const preview = isPreviewableFile(name)
-    const tabId = preview ? `preview:${path}` : path
-    // If tab already open, just activate it
-    if (fileTabs.some(t => t.id === tabId)) {
-      setActiveTab(tabId)
-      return
-    }
-    setFileTabs(prev => [...prev, {
-      id: tabId,
-      name,
-      path,
-      kind: preview ? 'preview' : 'file',
-    }])
-    setActiveTab(tabId)
-  }, [fileTabs])
+    // Enter preview mode: collapse side panels, show chat + file preview on right
+    setPreviewingFile({ path, name })
+    // Do NOT open a file tab on the left — keep chat visible
+  }, [])
 
   const handleCloseTab = useCallback((tabId: string, e: React.MouseEvent) => {
     e.stopPropagation()
     setFileTabs(prev => prev.filter(t => t.id !== tabId))
-    // If closing the active tab, switch to chat
-    if (activeTab === tabId) setActiveTab('chat')
+    // If closing the active tab, switch to chat and exit preview mode
+    if (activeTab === tabId) {
+      setActiveTab('chat')
+      setPreviewingFile(null)
+    }
   }, [activeTab])
 
   // -----------------------------------------------------------------------
@@ -1795,9 +1797,12 @@ function ChatInterfaceContent() {
     const onKeyDown = (e: KeyboardEvent) => {
       // Alt+W — close active in-app tab
       if (e.altKey && !e.metaKey && !e.ctrlKey && e.key === 'w') {
-        if (fileTabs.length === 0) return
+        if (fileTabs.length === 0 && !previewingFile) return
         e.preventDefault()
-        if (activeTab !== 'chat') {
+        if (previewingFile) {
+          setPreviewingFile(null)
+          setActiveTab('chat')
+        } else if (activeTab !== 'chat') {
           setFileTabs(prev => prev.filter(t => t.id !== activeTab))
           setActiveTab('chat')
         } else {
@@ -1824,6 +1829,16 @@ function ChatInterfaceContent() {
     window.addEventListener('preview-ready', onPreviewReady)
     return () => window.removeEventListener('preview-ready', onPreviewReady)
   }, [])
+
+  // Listen for artifact-view events (fallback when onArtifactView prop doesn't reach)
+  useEffect(() => {
+    const onArtifactView = (e: Event) => {
+      const { path, name } = (e as CustomEvent).detail
+      if (path && name) handleFileOpen(path, name)
+    }
+    window.addEventListener('artifact-view', onArtifactView)
+    return () => window.removeEventListener('artifact-view', onArtifactView)
+  }, [handleFileOpen])
 
   const handleSelectSession = useCallback((sessionId: string) => {
     setFileTabs([])
@@ -1911,14 +1926,16 @@ function ChatInterfaceContent() {
 
   return (
     <div className="flex h-full">
-      {/* Session history panel (left) */}
-      <SessionHistoryPanel
-        businessScopeId={selectedBusinessScopeId}
-        activeSessionId={backendSessionId}
-        onSelectSession={handleSelectSession}
-        onNewSession={handleNewSession}
-        refreshKey={sessionRefreshKey}
-      />
+      {/* Session history panel (left) — hidden during file preview */}
+      {!previewingFile && (
+        <SessionHistoryPanel
+          businessScopeId={selectedBusinessScopeId}
+          activeSessionId={backendSessionId}
+          onSelectSession={handleSelectSession}
+          onNewSession={handleNewSession}
+          refreshKey={sessionRefreshKey}
+        />
+      )}
 
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0">
@@ -2016,10 +2033,23 @@ function ChatInterfaceContent() {
 
         {/* Error Banner */}
         {error && (
-          <div className="mx-4 mt-4 flex items-center gap-2 px-4 py-2 bg-red-500/20 border border-red-500/50 rounded-lg">
-            <AlertCircle className="w-4 h-4 text-red-400" />
-            <span className="text-sm text-red-400 flex-1">{error}</span>
-            <button onClick={clearError} className="text-red-400 hover:text-red-300">
+          <div className={`mx-4 mt-4 flex items-center gap-2 px-4 py-2 rounded-lg ${
+            errorCode === 'QUOTA_EXCEEDED'
+              ? 'bg-orange-500/20 border border-orange-500/50'
+              : 'bg-red-500/20 border border-red-500/50'
+          }`}>
+            <AlertCircle className={`w-4 h-4 ${errorCode === 'QUOTA_EXCEEDED' ? 'text-orange-400' : 'text-red-400'}`} />
+            <div className="flex-1">
+              <span className={`text-sm ${errorCode === 'QUOTA_EXCEEDED' ? 'text-orange-400' : 'text-red-400'}`}>
+                {errorCode === 'QUOTA_EXCEEDED'
+                  ? t('tokenQuota.exceededTitle')
+                  : error}
+              </span>
+              {errorCode === 'QUOTA_EXCEEDED' && (
+                <p className="text-xs text-orange-400/70 mt-0.5">{t('tokenQuota.contactAdmin')}</p>
+              )}
+            </div>
+            <button onClick={clearError} className={`${errorCode === 'QUOTA_EXCEEDED' ? 'text-orange-400 hover:text-orange-300' : 'text-red-400 hover:text-red-300'}`}>
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -2048,7 +2078,7 @@ function ChatInterfaceContent() {
                   isLoading={quickQuestionsLoading}
                 />
               ) : (
-                <MessageList messages={messages} isTyping={isSending} />
+                <MessageList messages={messages} isTyping={isSending} onArtifactView={handleFileOpen} onSendMessage={handleSendMessage} />
               )}
               <WorkspaceActions
                 sessionId={backendSessionId}
@@ -2072,16 +2102,93 @@ function ChatInterfaceContent() {
         )}
       </div>
 
-      {/* Resizable workspace panel */}
-      <WorkspaceExplorer
-        sessionId={backendSessionId}
-        businessScopeId={selectedBusinessScopeId}
-        refreshKey={wsRefreshKey}
-        isGenerating={isSending}
-        onFileOpen={handleFileOpen}
-        width={panelWidth}
-        onWidthChange={setPanelWidth}
-      />
+      {/* Right panel: workspace OR file preview */}
+      {previewingFile ? (
+        /* File preview mode — full right panel is the file viewer */
+        <div className="flex-1 flex flex-col border-l border-gray-800 min-w-0">
+          {/* Preview header with close button */}
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-800 bg-gray-900/50 flex-shrink-0">
+            <FileIcon className="w-3.5 h-3.5 text-blue-400" />
+            <span className="text-sm text-white truncate flex-1">{previewingFile.name}</span>
+            <button
+              onClick={() => { setPreviewingFile(null); setActiveTab('chat') }}
+              className="px-2 py-1 text-xs text-gray-400 hover:text-white hover:bg-gray-700 rounded transition-colors"
+            >
+              关闭预览
+            </button>
+          </div>
+          {/* File content */}
+          {backendSessionId && (
+            <FileViewerTab path={previewingFile.path} sessionId={backendSessionId} />
+          )}
+        </div>
+      ) : (
+        /* Normal mode: workspace panel with mode toggle */
+        <div
+          className="border-l border-gray-800 bg-gray-900 flex flex-col flex-shrink-0"
+          style={{ width: panelWidth, minWidth: 200 }}
+        >
+          {/* Mode toggle tabs — always visible */}
+          <div className="flex border-b border-gray-800 flex-shrink-0">
+            <button
+              onClick={() => setWorkspaceMode('artifacts')}
+              className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                workspaceMode === 'artifacts'
+                  ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                  : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              📋 产出物
+            </button>
+            <button
+              onClick={() => setWorkspaceMode('files')}
+              className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                workspaceMode === 'files'
+                  ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50'
+                  : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              📁 文件管理
+            </button>
+          </div>
+
+          {/* Panel content based on mode */}
+          <div className="flex-1 overflow-hidden">
+            {workspaceMode === 'artifacts' ? (
+              <ArtifactListPanel
+                sessionId={backendSessionId}
+                isGenerating={isSending}
+                onFileOpen={handleFileOpen}
+                onPreviewApp={(folder) => {
+                  // Trigger preview via the same publish-from-workspace API
+                  if (!backendSessionId) return
+                  restClient.post<{ id: string; name: string; access_url: string }>('/api/apps/publish-from-workspace', {
+                    session_id: backendSessionId,
+                    folder_path: folder,
+                    name: 'preview',
+                    status: 'preview',
+                  }).then(res => {
+                    window.dispatchEvent(new CustomEvent('preview-ready', {
+                      detail: { url: res.access_url, name: res.name, appId: res.id },
+                    }))
+                  }).catch(err => console.error('[ArtifactPanel] preview failed:', err))
+                }}
+                refreshKey={wsRefreshKey}
+              />
+            ) : (
+              <WorkspaceExplorer
+                sessionId={backendSessionId}
+                businessScopeId={selectedBusinessScopeId}
+                refreshKey={wsRefreshKey}
+                isGenerating={isSending}
+                onFileOpen={handleFileOpen}
+                width={panelWidth}
+                onWidthChange={setPanelWidth}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Save to Memory modal */}
       {showSaveMemory && backendSessionId && selectedBusinessScopeId && (

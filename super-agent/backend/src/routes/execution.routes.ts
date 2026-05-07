@@ -11,6 +11,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { workflowExecutionService } from '../services/workflow-execution.service.js';
 import { authenticate, requireModifyAccess } from '../middleware/auth.js';
+import { enforceTokenQuota } from '../middleware/token-quota.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { z } from 'zod';
 import { ZodError } from 'zod';
@@ -150,7 +151,7 @@ export async function executionRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post<ExecuteWorkflowRequest>(
     '/workflows/:workflowId/execute',
     {
-      preHandler: [authenticate, requireModifyAccess],
+      preHandler: [authenticate, requireModifyAccess, enforceTokenQuota],
       schema: {
         description: 'Start workflow execution',
         tags: ['Executions'],

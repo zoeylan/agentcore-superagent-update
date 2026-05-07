@@ -76,6 +76,10 @@ model organizations {
   response_templates         response_templates[]
   business_hours             business_hours[]
   audit_logs                 audit_logs[]
+  knowledge_bases            knowledge_bases[]
+  knowledge_folders          knowledge_folders[]
+  knowledge_files            knowledge_files[]
+  app_backend_instances      app_backend_instances[]
 
   @@index([slug])
   @@index([plan_type])
@@ -159,6 +163,7 @@ model business_scopes {
   scope_briefings           scope_briefings[]
   scope_memberships         scope_memberships[]
   scope_document_groups     scope_document_groups[]
+  scope_knowledge_bindings  scope_knowledge_bindings[]
   agent_scope_assignments   agent_scope_assignments[]
   rehearsal_sessions        rehearsal_sessions[]
   scope_evolution_proposals scope_evolution_proposals[]
@@ -843,6 +848,7 @@ model published_apps {
   bundle_path       String
   published_by      String?  @db.Uuid
   access_level      String   @default("org")
+  backend_type      String   @default("none") @db.VarChar(20) // none | builtin | insforge | custom
   metadata          Json     @default("{}")
   created_at        DateTime @default(now()) @db.Timestamptz
   updated_at        DateTime @default(now()) @updatedAt @db.Timestamptz
@@ -854,6 +860,7 @@ model published_apps {
   ratings        app_ratings[]
   versions       app_versions[]
   app_data       app_data[]
+  backend_instance app_backend_instances?
 
   @@index([org_id])
   @@index([status])
@@ -1131,6 +1138,7 @@ model document_groups {
   organization          organizations           @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   files                 document_group_files[]
   scope_document_groups scope_document_groups[]
+  knowledge_base_bindings knowledge_base_document_groups[]
 
   @@unique([organization_id, name], name: "unique_doc_group_name_per_org")
   @@index([organization_id])
@@ -2082,4 +2090,179 @@ model audit_logs {
   @@index([organization_id, created_at(sort: Desc)])
   @@index([organization_id, action])
   @@index([organization_id, actor_id, created_at(sort: Desc)])
+}
+
+// ============================================================================
+// Knowledge Bases — independent first-class knowledge resources
+// ============================================================================
+model knowledge_bases {
+  id              String   @id @default(uuid()) @db.Uuid
+  organization_id String   @db.Uuid
+  name            String   @db.VarChar(255)
+  description     String?  @db.VarChar(1000)
+  icon            String?  @db.VarChar(10)
+  status          String   @default("active") @db.VarChar(50)
+  document_count  Int      @default(0)
+  total_size      BigInt   @default(0)
+  created_by      String?  @db.Uuid
+  created_at      DateTime @default(now()) @db.Timestamptz
+  updated_at      DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  organization              organizations                    @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  scope_bindings            scope_knowledge_bindings[]
+  folders                   knowledge_folders[]
+  files                     knowledge_files[]
+  document_group_bindings   knowledge_base_document_groups[]
+
+  @@unique([organization_id, name], name: "unique_kb_name_per_org")
+  @@index([organization_id])
+  @@index([status])
+  @@index([created_at(sort: Desc)])
+}
+
+// ============================================================================
+// Scope ↔ Knowledge Base bindings (many-to-many)
+// ============================================================================
+model scope_knowledge_bindings {
+  id                String   @id @default(uuid()) @db.Uuid
+  scope_id          String   @db.Uuid
+  knowledge_base_id String   @db.Uuid
+  bound_by          String?  @db.Uuid
+  created_at        DateTime @default(now()) @db.Timestamptz
+
+  business_scope business_scopes @relation(fields: [scope_id], references: [id], onDelete: Cascade)
+  knowledge_base knowledge_bases @relation(fields: [knowledge_base_id], references: [id], onDelete: Cascade)
+
+  @@unique([scope_id, knowledge_base_id], name: "unique_scope_kb_binding")
+  @@index([scope_id])
+  @@index([knowledge_base_id])
+}
+
+// ============================================================================
+// Knowledge Base ↔ Document Group bindings
+// ============================================================================
+model knowledge_base_document_groups {
+  id                String   @id @default(uuid()) @db.Uuid
+  knowledge_base_id String   @db.Uuid
+  document_group_id String   @db.Uuid
+  created_at        DateTime @default(now()) @db.Timestamptz
+
+  knowledge_base knowledge_bases @relation(fields: [knowledge_base_id], references: [id], onDelete: Cascade)
+  document_group document_groups @relation(fields: [document_group_id], references: [id], onDelete: Cascade)
+
+  @@unique([knowledge_base_id, document_group_id], name: "unique_kb_doc_group")
+  @@index([knowledge_base_id])
+  @@index([document_group_id])
+}
+
+// ============================================================================
+// Knowledge Folders — user-defined folder structure within a knowledge base
+// ============================================================================
+model knowledge_folders {
+  id                String   @id @default(uuid()) @db.Uuid
+  organization_id   String   @db.Uuid
+  knowledge_base_id String   @db.Uuid
+  parent_id         String?  @db.Uuid
+  name              String   @db.VarChar(255)
+  path              String   @db.VarChar(1024)
+  created_by        String?  @db.Uuid
+  created_at        DateTime @default(now()) @db.Timestamptz
+  updated_at        DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  organization   organizations     @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  knowledge_base knowledge_bases   @relation(fields: [knowledge_base_id], references: [id], onDelete: Cascade)
+  parent         knowledge_folders? @relation("FolderTree", fields: [parent_id], references: [id], onDelete: Cascade)
+  children       knowledge_folders[] @relation("FolderTree")
+  files          knowledge_files[]
+
+  @@unique([knowledge_base_id, path], name: "unique_folder_path_per_kb")
+  @@index([organization_id])
+  @@index([knowledge_base_id])
+  @@index([parent_id])
+}
+
+// ============================================================================
+// Knowledge Files — file metadata within a knowledge base
+// ============================================================================
+model knowledge_files {
+  id                String   @id @default(uuid()) @db.Uuid
+  organization_id   String   @db.Uuid
+  knowledge_base_id String   @db.Uuid
+  folder_id         String?  @db.Uuid
+  display_name      String   @db.VarChar(255)
+  original_filename String   @db.VarChar(255)
+  stored_filename   String   @db.VarChar(255)
+  s3_key            String   @db.VarChar(512)
+  file_size         BigInt   @default(0)
+  mime_type         String   @default("application/octet-stream") @db.VarChar(100)
+  tags              String[] @default([])
+  is_starred        Boolean  @default(false)
+  index_status      String   @default("pending") @db.VarChar(20) // pending | indexing | indexed | failed
+  version           Int      @default(1)
+  uploaded_by       String?  @db.Uuid
+  created_at        DateTime @default(now()) @db.Timestamptz
+  updated_at        DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  organization   organizations     @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  knowledge_base knowledge_bases   @relation(fields: [knowledge_base_id], references: [id], onDelete: Cascade)
+  folder         knowledge_folders? @relation(fields: [folder_id], references: [id], onDelete: SetNull)
+
+  @@index([organization_id])
+  @@index([knowledge_base_id])
+  @@index([folder_id])
+  @@index([index_status])
+  @@index([knowledge_base_id, folder_id])
+  @@index([knowledge_base_id, tags])
+  @@index([created_at(sort: Desc)])
+}
+
+// ============================================================================
+// App Backend Instances — InsForge Project mapping for per-app BaaS
+// ============================================================================
+model app_backend_instances {
+  id              String   @id @default(uuid()) @db.Uuid
+  app_id          String   @unique @db.Uuid
+  org_id          String   @db.Uuid
+
+  // InsForge Project info
+  project_name    String   @db.VarChar(100)
+  provider        String   @default("insforge") @db.VarChar(20) // insforge | builtin | custom
+  status          String   @default("provisioning") @db.VarChar(20) // provisioning | active | paused | error | destroyed
+  instance_type   String   @default("nano") @db.VarChar(20) // nano | micro | small | medium | large
+
+  // Network config
+  host            String   @default("localhost")
+  port_postgres   Int
+  port_app        Int
+  port_auth       Int
+  port_deno       Int
+  port_postgrest  Int
+
+  // Access credentials (encrypted)
+  api_key         String
+  db_url_enc      String?  // encrypted PostgreSQL connection URL
+
+  // MCP endpoint for agent access
+  mcp_endpoint    String?
+
+  // Resource usage
+  storage_used_mb  Float   @default(0)
+  storage_limit_mb Float   @default(500)
+  db_size_mb       Float   @default(0)
+  db_limit_mb      Float   @default(500)
+
+  // Lifecycle
+  last_active_at  DateTime? @db.Timestamptz
+  paused_at       DateTime? @db.Timestamptz
+  error_message   String?
+  created_at      DateTime  @default(now()) @db.Timestamptz
+  updated_at      DateTime  @default(now()) @updatedAt @db.Timestamptz
+
+  // Relations
+  app            published_apps @relation(fields: [app_id], references: [id], onDelete: Cascade)
+  organization   organizations  @relation(fields: [org_id], references: [id], onDelete: Cascade)
+
+  @@index([org_id])
+  @@index([status])
+  @@index([last_active_at])
 }

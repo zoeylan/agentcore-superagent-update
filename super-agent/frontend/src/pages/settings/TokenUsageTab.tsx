@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { Loader2, BarChart3, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useMyTokenUsage, useOrganizationTokenUsage } from '@/services/useTokenUsage';
+import { useMyQuota } from '@/services/useTokenQuota';
+import { TokenQuotaCard } from '@/components/TokenQuotaCard';
+import { QuotaManagementSection } from './QuotaManagementSection';
 import { useTranslation } from '@/i18n';
 import type { MonthlyUsage } from '@/services/api/tokenUsageService';
 
@@ -118,11 +121,17 @@ export function TokenUsageTab({ isAdmin }: Props) {
 
   const myUsage = useMyTokenUsage(6);
   const orgUsage = useOrganizationTokenUsage(selectedMonth);
+  const { quota, isLoading: quotaLoading } = useMyQuota();
 
   const currentMonthUsage = myUsage.data.find((r) => r.month === currentMonth);
 
   return (
     <div className="space-y-8">
+      {/* Quota Status Card */}
+      {!quotaLoading && quota && (
+        <TokenQuotaCard quota={quota} />
+      )}
+
       {/* My Usage Summary */}
       <div>
         <h3 className="text-sm font-medium text-white mb-4 flex items-center gap-2">
@@ -200,6 +209,9 @@ export function TokenUsageTab({ isAdmin }: Props) {
           )}
         </div>
       )}
+
+      {/* Quota Management (Admin/Owner only) */}
+      {isAdmin && <QuotaManagementSection />}
     </div>
   );
 }

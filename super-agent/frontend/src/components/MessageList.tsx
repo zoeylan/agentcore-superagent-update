@@ -8,6 +8,8 @@ import { useTranslation } from '@/i18n'
 interface MessageListProps {
   messages: Message[]
   isTyping?: boolean
+  onArtifactView?: (path: string, name: string) => void
+  onSendMessage?: (message: string) => void
 }
 
 function formatTime(date: Date): string {
@@ -85,7 +87,7 @@ function TokenUsageBadge({ message }: { message: Message }) {
   )
 }
 
-function AIBubble({ message, isStreaming }: { message: Message; isStreaming?: boolean }) {
+function AIBubble({ message, isStreaming, onArtifactView, onSendMessage }: { message: Message; isStreaming?: boolean; onArtifactView?: (path: string, name: string) => void; onSendMessage?: (message: string) => void }) {
   const contentBlocks = useMemo(
     () => tryParseContentBlocks(message.content),
     [message.content]
@@ -113,6 +115,8 @@ function AIBubble({ message, isStreaming }: { message: Message; isStreaming?: bo
             isStreaming={isStreaming}
             speakerAgentName={message.speakerAgentName}
             speakerAgentAvatar={message.speakerAgentAvatar}
+            onArtifactView={onArtifactView}
+            onSendMessage={onSendMessage}
           />
         </div>
       ) : (
@@ -153,7 +157,7 @@ function TypingIndicator() {
   )
 }
 
-export function MessageList({ messages, isTyping = false }: MessageListProps) {
+export function MessageList({ messages, isTyping = false, onArtifactView, onSendMessage }: MessageListProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { t } = useTranslation()
 
@@ -178,6 +182,8 @@ export function MessageList({ messages, isTyping = false }: MessageListProps) {
               key={message.id}
               message={message}
               isStreaming={isTyping && idx === messages.length - 1}
+              onArtifactView={onArtifactView}
+              onSendMessage={onSendMessage}
             />
       ))}
       {isTyping && !messages.some(m => m.type === 'ai' && !m.content) && <TypingIndicator />}

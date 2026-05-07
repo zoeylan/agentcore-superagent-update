@@ -16,6 +16,7 @@ import type { McpServerEntry } from '@/data/mcp-servers'
 import { IMChannelsPanel } from './IMChannelsPanel'
 import { ScopeMemoryPanel } from './ScopeMemoryPanel'
 import { DocGroupsPanel } from './DocGroupsPanel'
+import { ScopeKnowledgePanel } from './ScopeKnowledgePanel'
 import { RehearsalPanel } from './RehearsalPanel'
 import { MCPCatalogPanel, type CustomMcpServer } from './MCPCatalogPanel'
 import { ConnectorPanel } from './ConnectorPanel'
@@ -1095,6 +1096,11 @@ export function ScopeProfile({ scope, agents, allAgents = [], onDeleteScope, onA
         {/*  Knowledge Base (Document Groups)                              */}
         {/* ============================================================ */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden p-4">
+          <ScopeKnowledgePanel scopeId={scope.id} />
+        </div>
+
+        {/* Legacy Document Groups (kept for backward compatibility) */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden p-4">
           <DocGroupsPanel scopeId={scope.id} scopeName={scope.name} />
         </div>
 
@@ -1270,44 +1276,44 @@ function A2AScopeSection({ agents, scopeId }: { agents: Agent[]; scopeId: string
     <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden p-4">
       <div className="flex items-center gap-2 mb-3">
         <Shield className="w-4 h-4 text-blue-400" />
-        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
+        <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
           {t('scopeProfile.a2aTitle')}
         </h3>
       </div>
-      <p className="text-xs text-gray-500 mb-3">
+      <p className="text-[10px] text-gray-500 mb-3">
         {t('scopeProfile.a2aDescription')}
       </p>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {agents.map(agent => (
           <div
             key={agent.id}
-            className="flex items-center justify-between p-2.5 bg-gray-800/50 border border-gray-700/50 rounded-lg"
+            className="flex items-center justify-between p-2 bg-gray-800/50 border border-gray-700/50 rounded-lg"
           >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-medium flex-shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-[10px] font-medium flex-shrink-0">
                 {agent.displayName.charAt(0)}
               </div>
               <div className="min-w-0">
-                <p className="text-sm text-white truncate">{agent.displayName}</p>
-                <p className="text-[10px] text-gray-500 truncate">{agent.role}</p>
+                <p className="text-xs text-white truncate">{agent.displayName}</p>
+                <p className="text-[9px] text-gray-500 truncate">{agent.role}</p>
               </div>
             </div>
             <button
               onClick={() => handleToggle(agent.id)}
               disabled={saving === agent.id}
-              className={`relative w-10 h-5.5 rounded-full transition-colors flex-shrink-0 ${
+              className={`relative w-8 h-4 rounded-full transition-colors flex-shrink-0 ${
                 a2aStates[agent.id] ? 'bg-blue-600' : 'bg-gray-600'
               } ${saving === agent.id ? 'opacity-50' : ''}`}
             >
-              <span className={`absolute top-0.5 left-0.5 w-4.5 h-4.5 bg-white rounded-full transition-transform ${
-                a2aStates[agent.id] ? 'translate-x-[18px]' : ''
+              <span className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform ${
+                a2aStates[agent.id] ? 'translate-x-[16px]' : ''
               }`} />
             </button>
           </div>
         ))}
       </div>
-      <div className="mt-3 p-2.5 bg-blue-900/10 border border-blue-500/20 rounded-lg">
-        <p className="text-[10px] text-blue-400">
+      <div className="mt-2.5 p-2 bg-blue-900/10 border border-blue-500/20 rounded-lg">
+        <p className="text-[9px] text-blue-400">
           {t('scopeProfile.a2aHint')}
         </p>
       </div>

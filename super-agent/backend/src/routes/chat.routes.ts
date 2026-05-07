@@ -23,6 +23,7 @@ import { devServerManager } from '../services/dev-server-manager.js';
 import { sanitizeEvent } from '../services/output-sanitizer.js';
 import { generateQuickQuestions } from '../services/quick-questions.service.js';
 import { authenticate, requireModifyAccess } from '../middleware/auth.js';
+import { enforceTokenQuota } from '../middleware/token-quota.js';
 import { scopeAccessService } from '../services/scopeAccess.service.js';
 import {
   chatStreamRequestSchema,
@@ -171,7 +172,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post<StreamChatRequest>(
     '/stream',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, enforceTokenQuota],
       schema: {
         description: 'Stream a chat response using Server-Sent Events',
         tags: ['Chat'],
@@ -1829,7 +1830,22 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
           try {
             const { readFile: rf } = await import('fs/promises');
             const pkg = JSON.parse(await rf(pkgPath, 'utf-8'));
-            name = pkg.name || null;
+            // Use package.json name only if it's meaningful (not generic)
+            const pkgName = pkg.name || null;
+            if (pkgName && !['app', 'my-app', 'vite-project', 'react-app', 'my-project'].includes(pkgName)) {
+              name = pkgName;
+            }
+          } catch { /* ignore */ }
+        }
+        // Fallback: try to extract <title> from index.html
+        if (!name) {
+          try {
+            const { readFile: rf } = await import('fs/promises');
+            const htmlContent = await rf(join(wsPath, rootEntry), 'utf-8');
+            const titleMatch = htmlContent.match(/<title[^>]*>([^<]+)<\/title>/i);
+            if (titleMatch && titleMatch[1] && !['Vite App', 'React App', 'Vite + React', 'Document', 'Index'].includes(titleMatch[1].trim())) {
+              name = titleMatch[1].trim();
+            }
           } catch { /* ignore */ }
         }
         apps.push({
@@ -1863,7 +1879,22 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
                 try {
                   const { readFile: rf } = await import('fs/promises');
                   const pkg = JSON.parse(await rf(pkgPath, 'utf-8'));
-                  name = pkg.name || null;
+                  const pkgName = pkg.name || null;
+                  if (pkgName && !['app', 'my-app', 'vite-project', 'react-app', 'my-project'].includes(pkgName)) {
+                    name = pkgName;
+                  }
+                } catch { /* ignore */ }
+              }
+              // Fallback: try HTML title
+              if (!name) {
+                try {
+                  const { readFile: rf } = await import('fs/promises');
+                  const entryPath = found.includes('/') ? join(dirPath, found) : join(dirPath, found);
+                  const htmlContent = await rf(entryPath, 'utf-8');
+                  const titleMatch = htmlContent.match(/<title[^>]*>([^<]+)<\/title>/i);
+                  if (titleMatch && titleMatch[1] && !['Vite App', 'React App', 'Vite + React', 'Document', 'Index'].includes(titleMatch[1].trim())) {
+                    name = titleMatch[1].trim();
+                  }
                 } catch { /* ignore */ }
               }
               apps.push({
