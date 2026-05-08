@@ -87,6 +87,8 @@ export const chatStreamRequestSchema = z.object({
   message: z.string().min(1, 'Message is required'),
   model: z.string().max(200).optional(),
   context: z.record(z.string(), z.unknown()).optional(),
+  /** File names recently uploaded by the user (injected as context for the agent). */
+  attached_files: z.array(z.string()).optional(),
 });
 
 /**

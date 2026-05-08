@@ -9,7 +9,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { FileText, Image, Table2, File as FileIcon, Code, Globe, Loader2, Eye, RefreshCw, Rocket } from 'lucide-react'
+import { FileText, Image, Table2, File as FileIcon, Code, Globe, Loader2, Eye, RefreshCw, Rocket, Copy } from 'lucide-react'
 import { restClient } from '@/services/api/restClient'
 import type { FileNode } from '@/components/WorkspaceExplorer'
 
@@ -278,20 +278,35 @@ export function ArtifactListPanel({ sessionId, isGenerating, onFileOpen, onPrevi
               </button>
             </div>
           ) : (
-            <button
+            <div
               key={item.path}
-              onClick={() => onFileOpen?.(item.path, item.name)}
               className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-gray-800/50 transition-colors text-left border-b border-gray-800/30 last:border-0"
             >
               <TypeIcon type={item.type} />
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onFileOpen?.(item.path, item.name)}>
                 <p className="text-xs text-white truncate">{item.name}</p>
                 {item.size && (
                   <p className="text-[10px] text-gray-600">{formatSize(item.size)}</p>
                 )}
               </div>
-              <Eye className="w-3 h-3 text-gray-600 flex-shrink-0" />
-            </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  navigator.clipboard.writeText(item.path)
+                }}
+                className="p-1 text-gray-600 hover:text-blue-400 transition-colors flex-shrink-0"
+                title="拷贝文件路径"
+              >
+                <Copy className="w-3 h-3" />
+              </button>
+              <button
+                onClick={() => onFileOpen?.(item.path, item.name)}
+                className="p-1 text-gray-600 hover:text-white transition-colors flex-shrink-0"
+                title="预览"
+              >
+                <Eye className="w-3 h-3" />
+              </button>
+            </div>
           )
         ))}
       </div>

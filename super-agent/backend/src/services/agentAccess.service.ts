@@ -286,7 +286,7 @@ export class AgentAccessService {
 
       // Check explicit permission
       if (explicitMap.has(agent.id)) {
-        accessLevel = explicitMap.get(agent.id);
+        accessLevel = explicitMap.get(agent.id) as string;
         accessSource = 'explicit';
       }
       // Check creator

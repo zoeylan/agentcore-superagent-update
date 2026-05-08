@@ -132,6 +132,8 @@ export interface StreamChatOptions {
   sessionId?: string;
   model?: string;
   context?: Record<string, unknown>;
+  /** File names recently uploaded by the user (injected as context for the agent). */
+  attachedFiles?: string[];
 }
 
 /**
@@ -379,6 +381,9 @@ export function streamChat(
       }
       if (options.model) {
         body.model = options.model;
+      }
+      if (options.attachedFiles && options.attachedFiles.length > 0) {
+        body.attached_files = options.attachedFiles;
       }
 
       const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {

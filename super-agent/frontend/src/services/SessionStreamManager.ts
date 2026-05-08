@@ -99,6 +99,7 @@ class SessionStreamManager {
       mentionAgentId?: string
       model?: string
       sopContext: string
+      attachedFiles?: string[]
     }
   ): void {
     const state = this.getSession(sessionId)
@@ -135,6 +136,7 @@ class SessionStreamManager {
         sessionId,
         model: options.model,
         context: { sop_context: options.sopContext },
+        attachedFiles: options.attachedFiles,
       },
       {
         onAssistant: (event) => {

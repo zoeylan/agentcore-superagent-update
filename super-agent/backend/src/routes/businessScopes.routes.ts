@@ -668,6 +668,19 @@ export async function businessScopeRoutes(fastify: FastifyInstance): Promise<voi
       const { id } = validateSchema(idParamSchema, request.params);
       await scopeAccessService.requireAccess(request.user!, id, 'viewer');
       const agents = await businessScopeService.getScopeAgentsWithSkills(id, request.user!.orgId);
+
+      // Filter agents by user's agent-level permissions (org admin/owner see all)
+      const user = request.user!;
+      if (user.role !== 'owner' && user.role !== 'admin') {
+        const { agentAccessService } = await import('../services/agentAccess.service.js');
+        const filtered = [];
+        for (const agent of agents) {
+          const canView = await agentAccessService.checkAccess(user.id, user.orgId, (agent as any).id, 'view');
+          if (canView) filtered.push(agent);
+        }
+        return reply.status(200).send(filtered);
+      }
+
       return reply.status(200).send(agents);
     }
   );

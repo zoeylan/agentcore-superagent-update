@@ -188,6 +188,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
             message: { type: 'string', minLength: 1 },
             model: { type: 'string' },
             context: { type: 'object' },
+            attached_files: { type: 'array', items: { type: 'string' } },
           },
         },
         response: {
@@ -214,6 +215,22 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         await scopeAccessService.requireAccess(request.user!, data.business_scope_id, 'viewer');
       }
 
+      // Enforce agent-level invoke permission
+      const targetAgentId = data.mention_agent_id || data.agent_id;
+      if (targetAgentId && request.user!.role !== 'owner' && request.user!.role !== 'admin') {
+        const { agentAccessService } = await import('../services/agentAccess.service.js');
+        const canInvoke = await agentAccessService.checkAccess(
+          request.user!.id, request.user!.orgId, targetAgentId, 'invoke',
+        );
+        if (!canInvoke) {
+          return reply.status(403).send({
+            error: 'You do not have permission to invoke this agent.',
+            code: 'AGENT_ACCESS_DENIED',
+            requestId: request.id,
+          });
+        }
+      }
+
       await chatService.streamChat(reply, request.user!.orgId, request.user!.id, {
         agentId: data.agent_id,
         businessScopeId: data.business_scope_id,
@@ -222,6 +239,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         message: data.message,
         model: data.model,
         context: data.context,
+        attachedFiles: data.attached_files,
       });
     }
   );

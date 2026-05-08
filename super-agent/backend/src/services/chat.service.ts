@@ -68,6 +68,8 @@ export interface ChatStreamOptions {
   /** Per-request model override (from chat UI model selector). */
   model?: string;
   context?: Record<string, unknown>;
+  /** File names recently uploaded by the user (injected as context for the agent). */
+  attachedFiles?: string[];
 }
 
 export interface ChatHistoryOptions {
@@ -697,6 +699,12 @@ export class ChatService {
         const displayLabel = mentionedInfo?.displayName ?? mentionedName;
         effectiveMessage = `[System routing: The user has @mentioned agent "${displayLabel}" (name: \`${mentionedName}\`). You MUST delegate this request to the \`${mentionedName}\` subagent using the Task tool. Do NOT answer directly — always delegate.]\n\n${options.message}`;
       }
+    }
+
+    // Inject attached files context so the agent knows which files were just uploaded
+    if (options.attachedFiles && options.attachedFiles.length > 0) {
+      const fileList = options.attachedFiles.map(f => `  - ${f}`).join('\n');
+      effectiveMessage = `[System context: The user has just uploaded the following file(s) to the workspace. You can read/access them directly by their file names:\n${fileList}]\n\n${effectiveMessage}`;
     }
 
     try {

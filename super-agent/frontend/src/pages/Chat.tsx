@@ -1335,6 +1335,10 @@ function MessageInput({ onSend, onStop, onUpload, sessionId, businessScopeId, di
   const [showUpload, setShowUpload] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
+  // Pasted image attachments (from clipboard Cmd+V)
+  const [pastedImages, setPastedImages] = useState<File[]>([])
+  const [pastedPreviews, setPastedPreviews] = useState<string[]>([])
+
   // Model selector state
   const [showModelPicker, setShowModelPicker] = useState(false)
   const [availableModels, setAvailableModels] = useState<Array<{ id: string; litellm_model: string; provider: string }>>([])
@@ -1385,6 +1389,45 @@ function MessageInput({ onSend, onStop, onUpload, sessionId, businessScopeId, di
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [showModelPicker])
+
+  // Clean up pasted image preview URLs on unmount or when images change
+  useEffect(() => {
+    return () => {
+      pastedPreviews.forEach(url => URL.revokeObjectURL(url))
+    }
+  }, [pastedPreviews])
+
+  const addPastedImage = useCallback((file: File) => {
+    setPastedImages(prev => [...prev, file])
+    setPastedPreviews(prev => [...prev, URL.createObjectURL(file)])
+  }, [])
+
+  const removePastedImage = useCallback((index: number) => {
+    setPastedPreviews(prev => {
+      URL.revokeObjectURL(prev[index])
+      return prev.filter((_, i) => i !== index)
+    })
+    setPastedImages(prev => prev.filter((_, i) => i !== index))
+  }, [])
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData.items
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.type.startsWith('image/')) {
+        e.preventDefault()
+        const file = item.getAsFile()
+        if (file) {
+          // Generate a meaningful filename with timestamp
+          const ext = item.type.split('/')[1] || 'png'
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+          const namedFile = new File([file], `clipboard-${timestamp}.${ext}`, { type: file.type })
+          addPastedImage(namedFile)
+        }
+        return // Only handle the first image
+      }
+    }
+  }, [addPastedImage])
 
   const filtered = acVisible
     ? allFiles.filter(f => f.toLowerCase().includes(acQuery.toLowerCase())).slice(0, 12)
@@ -1488,14 +1531,22 @@ function MessageInput({ onSend, onStop, onUpload, sessionId, businessScopeId, di
   }, [allFiles, businessScopeId, mentionedAgent, dismissAc, dismissMention])
 
   const handleSubmit = useCallback(() => {
-    if (input.trim() && !disabled) {
-      onSend(input.trim(), mentionedAgent?.id)
+    if ((input.trim() || pastedImages.length > 0) && !disabled) {
+      // Upload pasted images first, then send the message
+      if (pastedImages.length > 0) {
+        onUpload([...pastedImages])
+      }
+      if (input.trim()) {
+        onSend(input.trim(), mentionedAgent?.id)
+      }
       setInput('')
       setMentionedAgent(null)
+      setPastedImages([])
+      setPastedPreviews(prev => { prev.forEach(url => URL.revokeObjectURL(url)); return [] })
       dismissAc()
       dismissMention()
     }
-  }, [input, disabled, onSend, mentionedAgent, dismissAc, dismissMention])
+  }, [input, pastedImages, disabled, onSend, onUpload, mentionedAgent, dismissAc, dismissMention])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Agent mention popup keyboard navigation
@@ -1589,6 +1640,32 @@ function MessageInput({ onSend, onStop, onUpload, sessionId, businessScopeId, di
           </div>
         )}
 
+        {/* Pasted image previews */}
+        {pastedImages.length > 0 && (
+          <div className="flex items-center gap-2 px-4 pt-2 overflow-x-auto">
+            {pastedPreviews.map((url, i) => (
+              <div key={i} className="relative group flex-shrink-0">
+                <img
+                  src={url}
+                  alt={pastedImages[i]?.name || 'pasted image'}
+                  className="w-16 h-16 object-cover rounded-lg border border-gray-700"
+                />
+                <button
+                  onClick={() => removePastedImage(i)}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-600 rounded-full flex items-center justify-center
+                             opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+                  title={t('chat.removeImage')}
+                >
+                  <X className="w-3 h-3 text-white" />
+                </button>
+                <span className="absolute bottom-0 left-0 right-0 text-[9px] text-center text-gray-400 bg-black/60 rounded-b-lg px-1 truncate">
+                  {pastedImages[i]?.name?.replace('clipboard-', '').split('.')[0] || 'image'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="relative flex items-end gap-2 p-4">
           {/* Agent mention popup */}
           {mentionVisible && businessScopeId && (
@@ -1639,6 +1716,7 @@ function MessageInput({ onSend, onStop, onUpload, sessionId, businessScopeId, di
             value={input}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             onBlur={() => setTimeout(() => { dismissAc(); dismissMention() }, 150)}
             placeholder={businessScopeId ? t('chat.placeholderWithMention') : t('chat.placeholder')}
             disabled={disabled}
@@ -1658,7 +1736,7 @@ function MessageInput({ onSend, onStop, onUpload, sessionId, businessScopeId, di
           ) : (
             <button
               onClick={handleSubmit}
-              disabled={disabled || !input.trim()}
+              disabled={disabled || (!input.trim() && pastedImages.length === 0)}
               className="p-2 bg-blue-600 border border-blue-600 rounded-lg hover:bg-blue-500 hover:border-blue-500 transition-colors
                          disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
             >
@@ -1681,6 +1759,8 @@ function ChatInterfaceContent() {
   const toast = useToast()
   const toastRef = useRef(toast)
   toastRef.current = toast
+  // Track recently uploaded file names to include as context in the next message
+  const recentlyUploadedFilesRef = useRef<string[]>([])
   const {
     messages,
     quickQuestions,
@@ -1863,7 +1943,12 @@ function ChatInterfaceContent() {
   const handleSendMessage = useCallback(async (content: string, mentionAgentId?: string) => {
     // Switch to chat tab when sending a message
     setActiveTab('chat')
-    await sendMessage(content, mentionAgentId)
+    // Include recently uploaded files as context, then clear the list
+    const files = recentlyUploadedFilesRef.current.length > 0
+      ? [...recentlyUploadedFilesRef.current]
+      : undefined
+    recentlyUploadedFilesRef.current = []
+    await sendMessage(content, mentionAgentId, files)
   }, [sendMessage])
 
   const handleUploadFile = useCallback(async (files: File[]) => {
@@ -1873,6 +1958,7 @@ function ChatInterfaceContent() {
 
     let successCount = 0
     let failCount = 0
+    const uploadedNames: string[] = []
 
     for (const file of files) {
       try {
@@ -1899,10 +1985,19 @@ function ChatInterfaceContent() {
         }
 
         successCount++
+        uploadedNames.push(file.name)
       } catch (err) {
         failCount++
         console.error('Upload failed:', file.name, err)
       }
+    }
+
+    // Track uploaded file names so the next message includes them as context
+    if (uploadedNames.length > 0) {
+      recentlyUploadedFilesRef.current = [
+        ...recentlyUploadedFilesRef.current,
+        ...uploadedNames,
+      ]
     }
 
     if (successCount > 0) {

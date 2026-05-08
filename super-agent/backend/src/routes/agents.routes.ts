@@ -122,6 +122,17 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
 
       const result = await agentService.getAgents(request.user!.orgId, filters, pagination);
 
+      // Filter agents by user's access permissions (org admin/owner see all)
+      const user = request.user!;
+      if (user.role !== 'owner' && user.role !== 'admin') {
+        const { agentAccessService } = await import('../services/agentAccess.service.js');
+        const accessibleAgents = await agentAccessService.getUserAccessibleAgents(user.id, user.orgId);
+        const accessibleIds = new Set(accessibleAgents.map(a => a.id));
+        result.data = result.data.filter((a: any) => accessibleIds.has(a.id));
+        result.pagination.total = result.data.length;
+        result.pagination.totalPages = Math.ceil(result.data.length / (pagination.limit ?? 20));
+      }
+
       return reply.status(200).send(result);
     }
   );
@@ -134,7 +145,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get<GetAgentByIdRequest>(
     '/:id',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requireAgentAccess('view')],
       schema: {
         description: 'Get an agent by ID',
         tags: ['Agents'],
@@ -195,7 +206,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get<{ Params: { id: string }; Querystring: { limit?: number; event_type?: string } }>(
     '/:id/events',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requireAgentAccess('view')],
       schema: {
         description: 'Get execution events for an agent',
         tags: ['Agents'],
@@ -490,7 +501,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.get<{ Params: { id: string } }>(
     '/:id/scopes',
-    { preHandler: [authenticate] },
+    { preHandler: [authenticate, requireAgentAccess('view')] },
     async (request, reply) => {
       const { agentScopeService } = await import('../services/agent-scope.service.js');
       const assignments = await agentScopeService.getAgentScopes(request.user!.orgId, request.params.id);
@@ -503,7 +514,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.post<{ Params: { id: string }; Body: { business_scope_id: string; is_primary?: boolean } }>(
     '/:id/scopes',
-    { preHandler: [authenticate, requireModifyAccess] },
+    { preHandler: [authenticate, requireAgentAccess('admin')] },
     async (request, reply) => {
       const { agentScopeService } = await import('../services/agent-scope.service.js');
       const assignment = await agentScopeService.bindAgentToScope(
@@ -522,7 +533,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
    */
   fastify.delete<{ Params: { id: string; scopeId: string } }>(
     '/:id/scopes/:scopeId',
-    { preHandler: [authenticate, requireModifyAccess] },
+    { preHandler: [authenticate, requireAgentAccess('admin')] },
     async (request, reply) => {
       const { agentScopeService } = await import('../services/agent-scope.service.js');
       await agentScopeService.unbindAgentFromScope(
