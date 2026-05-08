@@ -154,7 +154,7 @@ export class AgentService {
    * @returns The created agent
    * @throws AppError.validation if name is empty or invalid
    */
-  async createAgent(data: CreateAgentInput, organizationId: string): Promise<AgentEntity> {
+  async createAgent(data: CreateAgentInput, organizationId: string, userId?: string): Promise<AgentEntity> {
     // Validate required fields
     if (!data.name || data.name.trim() === '') {
       throw AppError.validation('Agent name is required');
@@ -187,9 +187,27 @@ export class AgentService {
         model_config: data.model_config ?? {},
         origin: data.origin ?? 'scope_generation',
         is_shared: data.is_shared ?? false,
-      },
+        created_by: userId ?? null,
+      } as any,
       organizationId
     );
+
+    // Create owner permission record for the creator
+    if (userId) {
+      try {
+        await (prisma as any).agent_permissions.create({
+          data: {
+            organization_id: organizationId,
+            agent_id: agent.id,
+            user_id: userId,
+            permission: 'owner',
+            granted_by: userId,
+          },
+        });
+      } catch (err) {
+        console.error(`Failed to create owner permission for agent ${agent.id}:`, err);
+      }
+    }
 
     // Create scope assignment if agent belongs to a scope
     if (agent.business_scope_id) {

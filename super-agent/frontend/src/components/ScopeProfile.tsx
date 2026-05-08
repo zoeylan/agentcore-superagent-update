@@ -5,7 +5,7 @@ import {
   Users, Zap, TrendingUp, BarChart3,
   CheckCircle2, AlertCircle, Clock, FileText,
   MessageSquare, Shield, Database, Settings, Save,
-  Terminal, Pencil, Sparkles,
+  Terminal, Pencil, Sparkles, Globe, Lock,
 } from 'lucide-react'
 import { useMCP } from '@/services'
 import { useToast } from '@/components'
@@ -22,6 +22,7 @@ import { MCPCatalogPanel, type CustomMcpServer } from './MCPCatalogPanel'
 import { ConnectorPanel } from './ConnectorPanel'
 import { SkillsPanel } from './SkillsPanel'
 import { CustomerServiceSection } from './CustomerServiceSection'
+import { AgentPermissionsPanel } from './AgentPermissionsPanel'
 import {
   getAvatarDisplayUrl,
   getAvatarFallback,
@@ -1119,6 +1120,11 @@ export function ScopeProfile({ scope, agents, allAgents = [], onDeleteScope, onA
         </div>
 
         {/* ============================================================ */}
+        {/*  Access Control & Permissions                                  */}
+        {/* ============================================================ */}
+        <ScopePermissionsSection scope={scope} />
+
+        {/* ============================================================ */}
         {/*  Agent Evolution (Rehearsals & Proposals)                     */}
         {/* ============================================================ */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden p-4">
@@ -1316,6 +1322,321 @@ function A2AScopeSection({ agents, scopeId }: { agents: Agent[]; scopeId: string
         <p className="text-[9px] text-blue-400">
           {t('scopeProfile.a2aHint')}
         </p>
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  Scope Permissions Section                                          */
+/*  For business scopes: shows scope member management + agent perms   */
+/*  For digital twin scopes: shows delegate management                 */
+/* ------------------------------------------------------------------ */
+
+function ScopePermissionsSection({ scope }: { scope: BusinessScope }) {
+  const isDigitalTwin = scope.scopeType === 'digital_twin'
+
+  // For digital twin scopes, we show the AgentPermissionsPanel
+  // which handles delegate management (the twin itself is the "agent")
+  // For business scopes, we show scope-level access control
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-800">
+        <div className="flex items-center gap-2">
+          <Shield className="w-4 h-4 text-purple-400" />
+          <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+            {isDigitalTwin ? t('scopeProfile.delegateManagement') : t('scopeProfile.accessControl')}
+          </h3>
+        </div>
+        {isDigitalTwin && (
+          <p className="text-[10px] text-gray-500 mt-1">
+            {t('scopeProfile.delegateHint')}
+          </p>
+        )}
+        {!isDigitalTwin && (
+          <p className="text-[10px] text-gray-500 mt-1">
+            {t('scopeProfile.accessControlHint')}
+          </p>
+        )}
+      </div>
+
+      {isDigitalTwin ? (
+        // Digital Twin: show agent-level permissions panel for the twin's primary agent
+        <DigitalTwinDelegateSection scopeId={scope.id} />
+      ) : (
+        // Business Scope: show scope membership + visibility controls
+        <BusinessScopeAccessSection scopeId={scope.id} visibility={scope.visibility} />
+      )}
+    </div>
+  )
+}
+
+/**
+ * For Digital Twin scopes: find the primary agent and show its permissions panel.
+ * The "delegate" concept maps to agent_permissions with 'admin' level.
+ */
+function DigitalTwinDelegateSection({ scopeId }: { scopeId: string }) {
+  const [primaryAgentId, setPrimaryAgentId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    restClient.get<Agent[]>(`/api/business-scopes/${scopeId}/agents`)
+      .then(agents => {
+        // The primary agent is typically the first (and often only) agent in a digital twin scope
+        if (agents.length > 0) {
+          setPrimaryAgentId((agents[0] as any).id)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [scopeId])
+
+  if (loading) {
+    return (
+      <div className="p-4 text-center text-gray-500 text-sm">
+        <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+        {t('common.loading')}
+      </div>
+    )
+  }
+
+  if (!primaryAgentId) {
+    return (
+      <div className="p-4 text-center text-gray-500 text-sm">
+        {t('scopeProfile.noAgentFound')}
+      </div>
+    )
+  }
+
+  return (
+    <AgentPermissionsPanel
+      agentId={primaryAgentId}
+      agentOrigin="digital_twin"
+    />
+  )
+}
+
+/**
+ * For Business Scopes: inline scope membership management.
+ * Shows visibility toggle and member list with role management.
+ */
+function BusinessScopeAccessSection({ scopeId, visibility }: { scopeId: string; visibility: string }) {
+  const [members, setMembers] = useState<Array<{
+    id: string; user_id: string; role: string;
+    name: string | null; email: string | null;
+  }>>([])
+  const [loading, setLoading] = useState(true)
+  const [currentVisibility, setCurrentVisibility] = useState(visibility)
+  const [showAddMember, setShowAddMember] = useState(false)
+  const [selectedUserId, setSelectedUserId] = useState('')
+  const [selectedRole, setSelectedRole] = useState('viewer')
+  const [isAdding, setIsAdding] = useState(false)
+  const [orgMembers, setOrgMembers] = useState<Array<{ user_id: string; name: string; email: string }>>([])
+
+  // Load scope members
+  const loadMembers = useCallback(async () => {
+    try {
+      const res = await restClient.get<{ data: Array<any> }>(`/api/business-scopes/${scopeId}/members`)
+      setMembers(res.data || [])
+    } catch {
+      setMembers([])
+    } finally {
+      setLoading(false)
+    }
+  }, [scopeId])
+
+  useEffect(() => { loadMembers() }, [loadMembers])
+
+  // Load org members for the add picker
+  useEffect(() => {
+    restClient.get<{ data: Array<any> }>('/api/organizations/members')
+      .then(res => setOrgMembers((res.data || []).map((m: any) => ({
+        user_id: m.user_id || m.id,
+        name: m.name || m.full_name || '',
+        email: m.email || m.username || '',
+      }))))
+      .catch(() => setOrgMembers([]))
+  }, [])
+
+  const handleVisibilityChange = async (newVis: string) => {
+    try {
+      await restClient.patch(`/api/business-scopes/${scopeId}/visibility`, { visibility: newVis })
+      setCurrentVisibility(newVis)
+    } catch (err) {
+      console.error('Failed to update visibility:', err)
+    }
+  }
+
+  const handleAddMember = async () => {
+    if (!selectedUserId) return
+    setIsAdding(true)
+    try {
+      await restClient.post(`/api/business-scopes/${scopeId}/members`, {
+        user_id: selectedUserId,
+        role: selectedRole,
+      })
+      await loadMembers()
+      setShowAddMember(false)
+      setSelectedUserId('')
+      setSelectedRole('viewer')
+    } catch (err) {
+      console.error('Failed to add member:', err)
+    } finally {
+      setIsAdding(false)
+    }
+  }
+
+  const handleUpdateRole = async (membershipId: string, newRole: string) => {
+    try {
+      await restClient.patch(`/api/business-scopes/${scopeId}/members/${membershipId}`, { role: newRole })
+      await loadMembers()
+    } catch (err) {
+      console.error('Failed to update role:', err)
+    }
+  }
+
+  const handleRemoveMember = async (membershipId: string) => {
+    if (!window.confirm('确定要移除此成员吗？')) return
+    try {
+      await restClient.delete(`/api/business-scopes/${scopeId}/members/${membershipId}`)
+      await loadMembers()
+    } catch (err) {
+      console.error('Failed to remove member:', err)
+    }
+  }
+
+  // Filter out users already in scope
+  const existingUserIds = new Set(members.map(m => m.user_id))
+  const availableOrgMembers = orgMembers.filter(m => !existingUserIds.has(m.user_id))
+
+  return (
+    <div className="p-4 space-y-4">
+      {/* Visibility toggle */}
+      <div>
+        <label className="text-xs text-gray-400 mb-2 block">{t('scopeProfile.visibility')}</label>
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleVisibilityChange('open')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs border transition-colors ${
+              currentVisibility === 'open'
+                ? 'border-green-500/50 bg-green-500/10 text-green-400'
+                : 'border-gray-700 text-gray-400 hover:border-gray-600'
+            }`}
+          >
+            <Globe className="w-3 h-3" />
+            {t('scopeProfile.visibilityOpen')}
+          </button>
+          <button
+            onClick={() => handleVisibilityChange('restricted')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs border transition-colors ${
+              currentVisibility === 'restricted'
+                ? 'border-yellow-500/50 bg-yellow-500/10 text-yellow-400'
+                : 'border-gray-700 text-gray-400 hover:border-gray-600'
+            }`}
+          >
+            <Lock className="w-3 h-3" />
+            {t('scopeProfile.visibilityRestricted')}
+          </button>
+        </div>
+      </div>
+
+      {/* Member list */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-xs text-gray-400">
+            {t('scopeProfile.members')} ({members.length})
+          </label>
+          <button
+            onClick={() => setShowAddMember(true)}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 rounded transition-colors"
+          >
+            <Plus className="w-3 h-3" />
+            添加成员
+          </button>
+        </div>
+
+        {/* Add member form */}
+        {showAddMember && (
+          <div className="mb-3 p-3 bg-gray-800/50 rounded-lg border border-gray-700 space-y-2">
+            <select
+              value={selectedUserId}
+              onChange={(e) => setSelectedUserId(e.target.value)}
+              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white"
+            >
+              <option value="">-- 选择用户 --</option>
+              {availableOrgMembers.map(m => (
+                <option key={m.user_id} value={m.user_id}>
+                  {m.name || m.email}
+                </option>
+              ))}
+            </select>
+            <select
+              value={selectedRole}
+              onChange={(e) => setSelectedRole(e.target.value)}
+              className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-xs text-white"
+            >
+              <option value="admin">Admin (可管理)</option>
+              <option value="member">Member (可操作)</option>
+              <option value="viewer">Viewer (只读)</option>
+            </select>
+            <div className="flex gap-2">
+              <button
+                onClick={handleAddMember}
+                disabled={!selectedUserId || isAdding}
+                className="px-3 py-1.5 text-[10px] bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition-colors"
+              >
+                {isAdding ? '添加中...' : '确认'}
+              </button>
+              <button
+                onClick={() => setShowAddMember(false)}
+                className="px-3 py-1.5 text-[10px] text-gray-400 hover:text-white transition-colors"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <div className="text-center text-gray-500 text-xs py-2">
+            <Loader2 className="w-3 h-3 animate-spin inline mr-1" />
+            {t('common.loading')}
+          </div>
+        ) : members.length === 0 ? (
+          <p className="text-xs text-gray-500 text-center py-3 bg-gray-800/30 rounded-lg border border-gray-700/50">
+            {t('scopeProfile.noMembers')}
+          </p>
+        ) : (
+          <div className="space-y-1.5 max-h-[240px] overflow-y-auto">
+            {members.map(m => (
+              <div key={m.id} className="flex items-center gap-2 p-2 bg-gray-800/50 rounded-lg border border-gray-700/50">
+                <div className="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center text-[10px] text-gray-300 font-medium">
+                  {(m.name || m.email || '?').charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-white truncate">{m.name || m.email}</p>
+                </div>
+                <select
+                  value={m.role}
+                  onChange={(e) => handleUpdateRole(m.id, e.target.value)}
+                  className="bg-gray-900 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] text-gray-300"
+                >
+                  <option value="admin">Admin</option>
+                  <option value="member">Member</option>
+                  <option value="viewer">Viewer</option>
+                </select>
+                <button
+                  onClick={() => handleRemoveMember(m.id)}
+                  className="p-1 text-gray-500 hover:text-red-400 transition-colors"
+                  title="移除"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

@@ -22,8 +22,8 @@ import { getAvatarDisplayUrl, getAvatarFallback, shouldShowAvatarImage } from '@
 import { restClient } from '@/services/api/restClient'
 import { DocGroupsPanel } from './DocGroupsPanel'
 import { IMChannelsPanel } from './IMChannelsPanel'
-import { ScopeMemoryPanel } from './ScopeMemoryPanel'
 import { MCPServersPanel } from './MCPServersPanel'
+import { AgentPermissionsPanel } from './AgentPermissionsPanel'
 
 interface AgentProfileProps {
   agent: Agent
@@ -283,6 +283,22 @@ export function AgentProfile({ agent, onConfigure, onRemove, onToggleStatus }: A
       {/* Configuration Panels — same layout as ScopeProfile */}
       <AgentConfigSections agentId={agent.id} agentName={agent.displayName} scopeId={agent.businessScopeId || undefined} />
 
+      {/* Permissions Panel */}
+      <div className="mt-6 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-800">
+          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+            <Users className="w-4 h-4" />
+            {t('agentProfile.permissions')}
+          </h3>
+        </div>
+        <AgentPermissionsPanel
+          agentId={agent.id}
+          agentVisibility={(agent as any).visibility}
+          agentCreatedBy={(agent as any).created_by || (agent as any).createdBy}
+          agentOrigin={(agent as any).origin || agent.modelConfig?.agentType}
+        />
+      </div>
+
 
     </div>
   )
@@ -470,11 +486,6 @@ function AgentConfigSections({ agentId, agentName, scopeId }: { agentId: string;
       {/* IM Channels */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden p-4">
         <IMChannelsPanel scopeId={effectiveId} scopeName={effectiveName} />
-      </div>
-
-      {/* Memory */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden p-4">
-        <ScopeMemoryPanel scopeId={effectiveId} scopeName={effectiveName} />
       </div>
     </div>
   )

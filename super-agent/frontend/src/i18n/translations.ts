@@ -4581,5 +4581,35 @@ export const translations: TranslationData = {
   'cs.answer': { en: 'Answer', cn: '回答' },
   'cs.category': { en: 'Category', cn: '分类' },
   'cs.createFaq': { en: 'Create FAQ', cn: '创建 FAQ' },
-  'cs.cancel': { en: 'Cancel', cn: '取消' }
+  'cs.cancel': { en: 'Cancel', cn: '取消' },
+
+  // Agent Permissions
+  'agentProfile.permissions': { en: 'Permissions', cn: '权限管理' },
+  'agentProfile.executionLogs': { en: 'Execution Logs', cn: '执行日志' },
+  'agentProfile.noHistory': { en: 'No execution history yet', cn: '暂无执行记录' },
+  'agentProfile.enableAgent': { en: 'Enable Agent', cn: '启用智能体' },
+  'agentProfile.disableAgent': { en: 'Disable Agent', cn: '禁用智能体' },
+  'agentProfile.removeAgent': { en: 'Remove Agent', cn: '移除智能体' },
+  'agentProfile.noDescription': { en: 'No description', cn: '暂无描述' },
+  'agentProfile.mcpServers': { en: 'MCP Servers', cn: 'MCP 服务器' },
+  'agentProfile.manage': { en: 'Manage', cn: '管理' },
+  'agentProfile.eventSubAgent': { en: 'Sub-agent', cn: '子智能体' },
+  'agentProfile.eventTool': { en: 'Tool', cn: '工具' },
+  'agentProfile.eventSkill': { en: 'Skill', cn: '技能' },
+  'agentProfile.eventComplete': { en: 'Complete', cn: '完成' },
+
+  // Scope Permissions
+  'scopeProfile.accessControl': { en: 'Access Control', cn: '访问控制' },
+  'scopeProfile.accessControlHint': { en: 'Manage who can access this scope and their roles', cn: '管理谁可以访问此业务域及其角色' },
+  'scopeProfile.delegateManagement': { en: 'Delegate Management', cn: '委托管理' },
+  'scopeProfile.delegateHint': { en: 'Manage who can edit and maintain this digital twin', cn: '管理谁可以编辑和维护此数字分身' },
+  'scopeProfile.visibility': { en: 'Visibility', cn: '可见性' },
+  'scopeProfile.visibilityOpen': { en: 'Open', cn: '开放' },
+  'scopeProfile.visibilityRestricted': { en: 'Restricted', cn: '受限' },
+  'scopeProfile.members': { en: 'Members', cn: '成员' },
+  'scopeProfile.noMembers': { en: 'No members yet', cn: '暂无成员' },
+  'scopeProfile.noAgentFound': { en: 'No agent found for this twin', cn: '未找到此分身的智能体' },
+
+  // Settings - User Access Tab
+  'settings.tab.userAccess': { en: 'User Access', cn: '用户权限' }
 }

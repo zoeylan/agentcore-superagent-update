@@ -77,6 +77,7 @@ import { litellmRoutes } from './litellm.routes.js';
 import { a2aRoutes } from './a2a.routes.js';
 import { auditRoutes } from './audit.routes.js';
 import { knowledgeBaseRoutes } from './knowledge-base.routes.js';
+import { agentPermissionRoutes } from './agentPermissions.routes.js';
 
 /**
  * Register all API routes on the Fastify instance.
@@ -123,6 +124,9 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   // Agent Management Routes
   // Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8
   await fastify.register(agentRoutes, { prefix: '/api/agents' });
+
+  // Agent Permission Routes (agent-level access control)
+  await fastify.register(agentPermissionRoutes, { prefix: '/api/agents' });
 
   // Task Management Routes
   // Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7

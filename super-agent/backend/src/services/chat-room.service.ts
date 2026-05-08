@@ -325,7 +325,7 @@ export class ChatRoomService {
       business_scope_id: session.business_scope_id,
       origin: 'chat_created',
       is_shared: false,
-    }, organizationId);
+    }, organizationId, userId);
 
     // Add to room
     await chatRoomMemberRepository.addMember(roomId, agent.id, 'member', userId);

@@ -80,6 +80,7 @@ model organizations {
   knowledge_folders          knowledge_folders[]
   knowledge_files            knowledge_files[]
   app_backend_instances      app_backend_instances[]
+  agent_permissions          agent_permissions[]
 
   @@index([slug])
   @@index([plan_type])
@@ -224,6 +225,9 @@ model agents {
   a2a_exposed_skills String[] @default([])
   registry_record_id String?  @db.VarChar(100)
   registry_record_arn String?
+  // Ownership & visibility
+  created_by        String?  @db.Uuid
+  visibility        String   @default("scope_default") @db.VarChar(20) // public | scope_default | private
   created_at        DateTime @default(now()) @db.Timestamptz
   updated_at        DateTime @default(now()) @updatedAt @db.Timestamptz
 
@@ -234,6 +238,7 @@ model agents {
   scope_briefings   scope_briefings[]
   scope_assignments agent_scope_assignments[]
   room_memberships  chat_room_members[]
+  permissions       agent_permissions[]
 
   @@unique([organization_id, business_scope_id, name], name: "unique_agent_name_per_scope")
   @@index([organization_id])
@@ -242,6 +247,7 @@ model agents {
   @@index([name])
   @@index([origin])
   @@index([a2a_enabled])
+  @@index([created_by])
   @@index([created_at(sort: Desc)])
   @@index([organization_id, business_scope_id])
 }
@@ -2265,4 +2271,29 @@ model app_backend_instances {
   @@index([org_id])
   @@index([status])
   @@index([last_active_at])
+}
+
+// ============================================================================
+// Agent Permissions Table - agent-level access control
+// Stores explicit user permissions for individual agents.
+// Used for Digital Twin delegation and fine-grained agent access control.
+// ============================================================================
+model agent_permissions {
+  id              String   @id @default(uuid()) @db.Uuid
+  organization_id String   @db.Uuid
+  agent_id        String   @db.Uuid
+  user_id         String   @db.Uuid
+  permission      String   @default("invoke") @db.VarChar(20) // owner | admin | invoke | view
+  granted_by      String?  @db.Uuid
+  created_at      DateTime @default(now()) @db.Timestamptz
+  updated_at      DateTime @default(now()) @updatedAt @db.Timestamptz
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  agent        agents        @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+
+  @@unique([agent_id, user_id], name: "unique_agent_user_permission")
+  @@index([agent_id])
+  @@index([user_id])
+  @@index([organization_id])
+  @@index([agent_id, user_id])
 }

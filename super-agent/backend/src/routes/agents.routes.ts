@@ -7,6 +7,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { agentService } from '../services/agent.service.js';
 import { authenticate, requireModifyAccess } from '../middleware/auth.js';
+import { requireAgentAccess } from '../middleware/agentAccess.js';
 import {
   createAgentSchema,
   updateAgentSchema,
@@ -338,7 +339,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<CreateAgentRequest>, reply: FastifyReply) => {
       const data = validateSchema(createAgentSchema, request.body);
 
-      const agent = await agentService.createAgent(data, request.user!.orgId);
+      const agent = await agentService.createAgent(data, request.user!.orgId, request.user!.id);
 
       return reply.status(201).send(agent);
     }
@@ -352,7 +353,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.put<UpdateAgentRequest>(
     '/:id',
     {
-      preHandler: [authenticate, requireModifyAccess],
+      preHandler: [authenticate, requireAgentAccess('admin')],
       schema: {
         description: 'Update an agent',
         tags: ['Agents'],
@@ -431,7 +432,7 @@ export async function agentRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.delete<DeleteAgentRequest>(
     '/:id',
     {
-      preHandler: [authenticate, requireModifyAccess],
+      preHandler: [authenticate, requireAgentAccess('owner')],
       schema: {
         description: 'Delete an agent',
         tags: ['Agents'],
