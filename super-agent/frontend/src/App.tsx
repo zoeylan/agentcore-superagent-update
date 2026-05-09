@@ -17,6 +17,7 @@ import { SupportSettings } from '@/pages/SupportSettings'
 import { SupportAnalytics } from '@/pages/SupportAnalytics'
 import { SupportKnowledge } from '@/pages/SupportKnowledge'
 import { SupportLive } from '@/pages/SupportLive'
+import { Approvals } from '@/pages/Approvals'
 import { AuthProvider } from '@/services/AuthContext'
 import { ThemeProvider } from '@/services/ThemeContext'
 import { useTranslation } from '@/i18n'
@@ -39,6 +40,7 @@ function AppContent() {
             <Route path="/chat" element={<Chat />} />
             <Route path="/chat/room/:roomId" element={<ChatRoomPage />} />
             <Route path="/workflow" element={<WorkflowEditor />} />
+            <Route path="/approvals" element={<Approvals />} />
             <Route path="/agents" element={<Agents />} />
             <Route path="/agents/config/:agentId" element={<AgentConfigurator />} />
             <Route path="/projects" element={<Projects />} />

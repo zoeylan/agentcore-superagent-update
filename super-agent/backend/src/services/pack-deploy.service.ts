@@ -9,6 +9,7 @@
  *   - agent_skills junction records
  *   - scope_memories records
  *   - scope_briefings record (SOP)
+ *   - workflows record (workflow DAG)
  *
  * This is a "fork" operation — the organization gets its own mutable copy.
  */
@@ -18,6 +19,7 @@ import { join, resolve } from 'path';
 import { existsSync } from 'fs';
 import { prisma } from '../config/database.js';
 import { skillService } from './skill.service.js';
+import { workflowService } from './workflow.service.js';
 
 // ============================================================================
 // Types
@@ -43,6 +45,8 @@ export interface DeployResult {
   skillCount: number;
   memoryCount: number;
   hasSop: boolean;
+  hasWorkflow: boolean;
+  workflowId?: string;
 }
 
 interface AgentDef {
@@ -368,6 +372,60 @@ class PackDeployService {
       }
     }
 
+    // ====================================================================
+    // 6. Import workflow
+    // ====================================================================
+    const workflowPath = join(scopeDir, 'workflow', 'workflow-plan.json');
+    let hasWorkflow = false;
+    let workflowId: string | undefined;
+
+    if (existsSync(workflowPath)) {
+      try {
+        const workflowPlan = JSON.parse(await readFile(workflowPath, 'utf-8'));
+
+        // Build agentRef → agentId mapping from created agents
+        const agentRefMap = new Map<string, string>();
+        for (const agent of createdAgents) {
+          agentRefMap.set(agent.name, agent.id);
+        }
+
+        // Transform nodes: resolve agentRef to agentId
+        const nodes = (workflowPlan.nodes || []).map((node: any) => {
+          const agentRef = node.metadata?.agentRef;
+          const resolvedAgentId = agentRef ? agentRefMap.get(agentRef) : undefined;
+          return {
+            ...node,
+            agentId: resolvedAgentId || undefined,
+          };
+        });
+
+        // Edges are already in { source, target } format
+        const connections = (workflowPlan.edges || []).map((edge: any) => ({
+          id: `${edge.source}->${edge.target}`,
+          source: edge.source,
+          target: edge.target,
+        }));
+
+        const workflow = await workflowService.createWorkflow(
+          {
+            name: workflowPlan.title || `${scopeName} Workflow`,
+            version: '1.0.0',
+            business_scope_id: scope.id,
+            is_official: true,
+            nodes,
+            connections,
+          },
+          organizationId,
+          userId,
+        );
+
+        hasWorkflow = true;
+        workflowId = workflow.id;
+      } catch (err) {
+        console.warn(`[pack-deploy] Failed to import workflow for ${scopeDirName}:`, err);
+      }
+    }
+
     return {
       scopeId: scope.id,
       scopeName,
@@ -375,6 +433,8 @@ class PackDeployService {
       skillCount,
       memoryCount,
       hasSop,
+      hasWorkflow,
+      workflowId,
     };
   }
 

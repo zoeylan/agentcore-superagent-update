@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   X, CheckCircle2, XCircle, Clock, Loader2, AlertTriangle,
   ChevronDown, ChevronRight, FileText, FolderOpen, ScrollText,
-  LayoutList, File, Folder, Download,
+  LayoutList, File, Folder, Download, StopCircle,
 } from 'lucide-react';
 import { getAuthToken } from '@/services/api/restClient';
 import { useTranslation } from '@/i18n';
@@ -43,7 +43,7 @@ interface ExecutionDetail {
   completed_at: string | null;
   created_at: string;
   variables: Array<{ name?: string; value?: string }>;
-  canvas_data: { nodes?: Array<{ id: string }> };
+  canvas_data: { nodes?: Array<{ id: string }>; edges?: Array<{ source: string; target: string }>; connections?: Array<{ from?: string; to?: string; source?: string; target?: string }> };
   node_executions: NodeExecution[];
 }
 
@@ -184,9 +184,53 @@ function NodesTab({ detail }: { detail: ExecutionDetail }) {
   const totalCount = detail.node_executions.length;
 
   const sortedNodes = (() => {
-    const planNodeIds = (detail.canvas_data?.nodes || []).map((n: { id: string }) => n.id);
-    if (planNodeIds.length === 0) return detail.node_executions;
-    const orderMap = new Map(planNodeIds.map((id: string, i: number) => [id, i]));
+    const planNodes = detail.canvas_data?.nodes || [];
+    if (planNodes.length === 0) return detail.node_executions;
+
+    // Build edges from canvas_data
+    const edges: Array<{ source: string; target: string }> = [];
+    if (detail.canvas_data?.edges) {
+      edges.push(...detail.canvas_data.edges);
+    } else if (detail.canvas_data?.connections) {
+      for (const c of detail.canvas_data.connections) {
+        edges.push({ source: c.source || c.from || '', target: c.target || c.to || '' });
+      }
+    }
+
+    // Topological sort using Kahn's algorithm
+    const nodeIds = new Set(planNodes.map(n => n.id));
+    const inDegree = new Map<string, number>();
+    const adjacency = new Map<string, string[]>();
+    for (const id of nodeIds) {
+      inDegree.set(id, 0);
+      adjacency.set(id, []);
+    }
+    for (const edge of edges) {
+      if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
+        adjacency.get(edge.source)!.push(edge.target);
+        inDegree.set(edge.target, (inDegree.get(edge.target) || 0) + 1);
+      }
+    }
+    const queue: string[] = [];
+    for (const [id, deg] of inDegree) {
+      if (deg === 0) queue.push(id);
+    }
+    const sorted: string[] = [];
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      sorted.push(id);
+      for (const neighbor of adjacency.get(id) || []) {
+        const newDeg = (inDegree.get(neighbor) || 1) - 1;
+        inDegree.set(neighbor, newDeg);
+        if (newDeg === 0) queue.push(neighbor);
+      }
+    }
+    // Append any missed nodes
+    for (const n of planNodes) {
+      if (!sorted.includes(n.id)) sorted.push(n.id);
+    }
+
+    const orderMap = new Map(sorted.map((id, i) => [id, i]));
     return [...detail.node_executions].sort((a, b) => {
       const aIdx = orderMap.get(a.node_id) ?? 999;
       const bIdx = orderMap.get(b.node_id) ?? 999;
@@ -507,20 +551,68 @@ export function ExecutionDetailModal({ executionId, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('nodes');
+  const [aborting, setAborting] = useState(false);
   const { t } = useTranslation();
 
   useEffect(() => {
-    const token = getAuthToken();
-    fetch(`${API_BASE_URL}/api/executions/${executionId}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
-        return res.json();
+    let cancelled = false;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const fetchDetail = () => {
+      const token = getAuthToken();
+      fetch(`${API_BASE_URL}/api/executions/${executionId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
-      .then((data) => { setDetail(data); setLoading(false); })
-      .catch((err) => { setError(err.message); setLoading(false); });
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
+          return res.json();
+        })
+        .then((data) => {
+          if (cancelled) return;
+          setDetail(data);
+          setLoading(false);
+          // Poll every 3s while executing
+          if (data.status === 'executing' || data.status === 'init') {
+            pollTimer = setTimeout(fetchDetail, 3000);
+          }
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setError(err.message);
+          setLoading(false);
+        });
+    };
+
+    fetchDetail();
+
+    return () => {
+      cancelled = true;
+      if (pollTimer) clearTimeout(pollTimer);
+    };
   }, [executionId]);
+
+  const handleAbort = async () => {
+    if (aborting) return;
+    setAborting(true);
+    try {
+      const token = getAuthToken();
+      const res = await fetch(`${API_BASE_URL}/api/executions/${executionId}/abort`, {
+        method: 'POST',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (res.ok) {
+        setDetail(prev => prev ? { ...prev, status: 'aborted' } : prev);
+      } else {
+        console.error('[abort] Failed:', res.status, await res.text().catch(() => ''));
+      }
+    } catch (err) {
+      console.error('[abort] Error:', err);
+    } finally {
+      setAborting(false);
+    }
+  };
 
   const tabs: Array<{ id: TabId; label: string; icon: React.ReactNode }> = [
     { id: 'nodes', label: t('execution.nodeLog'), icon: <LayoutList className="w-3.5 h-3.5" /> },
@@ -554,9 +646,21 @@ export function ExecutionDetailModal({ executionId, onClose }: Props) {
               </div>
             )}
           </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-gray-800 rounded-lg transition-colors">
-            <X className="w-5 h-5 text-gray-400" />
-          </button>
+          <div className="flex items-center gap-2">
+            {detail && (detail.status === 'executing' || detail.status === 'init' || detail.status === 'paused') && (
+              <button
+                onClick={handleAbort}
+                disabled={aborting}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg transition-colors text-sm disabled:opacity-50"
+              >
+                <StopCircle className="w-4 h-4" />
+                {t('execution.stop')}
+              </button>
+            )}
+            <button onClick={onClose} className="p-1.5 hover:bg-gray-800 rounded-lg transition-colors">
+              <X className="w-5 h-5 text-gray-400" />
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}

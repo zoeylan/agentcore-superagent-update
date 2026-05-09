@@ -2102,6 +2102,14 @@ export const translations: TranslationData = {
     en: 'Workflow end point',
     cn: '工作流终点'
   },
+  'canvas.nodeHumanApproval': {
+    en: 'Approval',
+    cn: '人工审批'
+  },
+  'canvas.nodeHumanApprovalDesc': {
+    en: 'Pause for human review and approval',
+    cn: '暂停等待人工审核通过'
+  },
 
   // Variables Panel
   'variables.title': {
@@ -2273,8 +2281,8 @@ export const translations: TranslationData = {
     cn: '结束'
   },
   'nodeType.humanApproval': {
-    en: 'Approval (legacy)',
-    cn: '审批（旧版）'
+    en: 'Human Approval',
+    cn: '人工审批'
   },
   'nodeType.action': {
     en: 'Action',
@@ -2343,6 +2351,10 @@ export const translations: TranslationData = {
   'execution.title': {
     en: 'Execution Detail',
     cn: '执行详情'
+  },
+  'execution.stop': {
+    en: 'Stop',
+    cn: '停止'
   },
   'execution.duration': {
     en: 'Duration: {n}s',
@@ -4611,5 +4623,49 @@ export const translations: TranslationData = {
   'scopeProfile.noAgentFound': { en: 'No agent found for this twin', cn: '未找到此分身的智能体' },
 
   // Settings - User Access Tab
-  'settings.tab.userAccess': { en: 'User Access', cn: '用户权限' }
+  'settings.tab.userAccess': { en: 'User Access', cn: '用户权限' },
+
+  // Approvals
+  'nav.approvals': { en: 'Approvals', cn: '审批' },
+  'approvals.title': { en: 'Approval Center', cn: '审批中心' },
+  'approvals.pending': { en: 'Pending', cn: '待审批' },
+  'approvals.processed': { en: 'Processed', cn: '已处理' },
+  'approvals.noPending': { en: 'No pending approvals', cn: '暂无待审批项' },
+  'approvals.noProcessed': { en: 'No processed approvals', cn: '暂无已处理项' },
+  'approvals.waitingApproval': { en: 'Waiting for approval', cn: '等待审批' },
+  'approvals.timeAgo': { en: 'ago', cn: '前' },
+  'approvals.remaining': { en: 'remaining', cn: '剩余' },
+  'approvals.expired': { en: 'Expired', cn: '已过期' },
+  'approvals.back': { en: 'Back', cn: '返回' },
+  'approvals.instructions': { en: 'Approval Instructions', cn: '审批说明' },
+  'approvals.upstreamOutputs': { en: 'Upstream Outputs', cn: '上游步骤输出' },
+  'approvals.actions': { en: 'Approval Actions', cn: '审批操作' },
+  'approvals.reason': { en: 'Reason (optional)', cn: '理由（可选）' },
+  'approvals.reasonPlaceholder': { en: 'Enter your reason...', cn: '请输入理由...' },
+  'approvals.approve': { en: 'Approve', cn: '通过' },
+  'approvals.reject': { en: 'Reject', cn: '驳回' },
+  'approvals.approved': { en: 'Approved', cn: '已通过' },
+  'approvals.rejected': { en: 'Rejected', cn: '已驳回' },
+  'approvals.createdAt': { en: 'Created', cn: '发起时间' },
+  'approvals.expiresAt': { en: 'Expires', cn: '截止时间' },
+  'approvals.resolvedAt': { en: 'Resolved', cn: '处理时间' },
+  'approvals.loading': { en: 'Loading approvals...', cn: '加载审批中...' },
+  'approvals.error': { en: 'Failed to load approvals', cn: '加载审批失败' },
+  'approvals.submitSuccess': { en: 'Approval submitted successfully', cn: '审批提交成功' },
+  'approvals.submitError': { en: 'Failed to submit approval', cn: '审批提交失败' },
+
+  // Approval Node Editor
+  'approvalEditor.title': { en: 'Approval Configuration', cn: '审批配置' },
+  'approvalEditor.instructions': { en: 'Approval Instructions', cn: '审批说明' },
+  'approvalEditor.instructionsPlaceholder': { en: 'Describe what the approver should review and the criteria for approval...', cn: '描述审批人需要审核的内容和判断标准...' },
+  'approvalEditor.approverRoles': { en: 'Approver Roles', cn: '审批人角色' },
+  'approvalEditor.approverRolesHint': { en: 'Select which roles can approve this step', cn: '选择哪些角色可以审批此步骤' },
+  'approvalEditor.timeout': { en: 'Timeout (hours)', cn: '超时时间（小时）' },
+  'approvalEditor.timeoutHint': { en: 'Auto-action after this duration', cn: '超过此时间后自动处理' },
+  'approvalEditor.timeoutAction': { en: 'Timeout Action', cn: '超时策略' },
+  'approvalEditor.timeoutAction.expire': { en: 'Mark as expired (fail)', cn: '标记为过期（失败）' },
+  'approvalEditor.timeoutAction.autoApprove': { en: 'Auto-approve', cn: '自动通过' },
+  'approvalEditor.role.admin': { en: 'Admin', cn: '管理员' },
+  'approvalEditor.role.owner': { en: 'Owner', cn: '所有者' },
+  'approvalEditor.role.member': { en: 'Member', cn: '成员' }
 }

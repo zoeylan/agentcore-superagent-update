@@ -87,19 +87,12 @@ function workflowToCanvasData(workflow: WorkflowType): CanvasData {
 function mapLegacyNodeType(type: string): CanvasNodeType {
   const mapping: Record<string, CanvasNodeType> = {
     trigger: 'start',
-    agent: 'agent',
     human: 'humanApproval',
-    action: 'action',
-    condition: 'condition',
-    document: 'document',
-    codeArtifact: 'codeArtifact',
-    resource: 'resource',
-    loop: 'loop',
-    parallel: 'parallel',
     start: 'start',
     end: 'end',
+    // All other types map 1:1 (agent, action, condition, document, codeArtifact, humanApproval, etc.)
   };
-  return mapping[type] || 'action';
+  return mapping[type] || (type as CanvasNodeType) || 'action';
 }
 
 // Convert canvas data back to legacy workflow format
@@ -109,7 +102,7 @@ function canvasDataToWorkflow(
 ): Partial<WorkflowType> {
   const nodes = canvasData.nodes.map((node) => ({
     id: node.id,
-    type: mapCanvasNodeTypeToLegacy(node.type as CanvasNodeType) as import('@/types').NodeType,
+    type: (node.type || 'action') as import('@/types').NodeType,
     label: node.data.title,
     description: node.data.contentPreview || '',
     position: { x: node.position.x, y: node.position.y },
@@ -155,7 +148,7 @@ function getIconForNodeType(type: CanvasNodeType): string {
   const icons: Record<CanvasNodeType, string> = {
     start: 'Play',
     agent: 'Bot',
-    humanApproval: 'User',
+    humanApproval: 'UserCheck',
     action: 'Zap',
     end: 'CheckCircle',
     trigger: 'Play',
@@ -197,9 +190,11 @@ export function WorkflowEditor() {
     history,
   } = useWorkflowExecution();
   
-  const [activeScopeId, setActiveScopeId] = useState<string | null>(null);
+  const [activeScopeId, setActiveScopeId] = useState<string | null>(() => {
+    return localStorage.getItem('workflow:activeScopeId') || null;
+  });
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(
-    searchParams.get('id')
+    searchParams.get('id') || localStorage.getItem('workflow:selectedWorkflowId') || null
   );
   const [isVersionDropdownOpen, setIsVersionDropdownOpen] = useState(false);
   const [showImporter, setShowImporter] = useState(false);
@@ -233,6 +228,15 @@ export function WorkflowEditor() {
       setActiveScopeId(businessScopes[0].id);
     }
   }, [activeScopeId, businessScopes]);
+
+  // Persist active scope and workflow to localStorage
+  useEffect(() => {
+    if (activeScopeId) localStorage.setItem('workflow:activeScopeId', activeScopeId);
+  }, [activeScopeId]);
+  useEffect(() => {
+    if (selectedWorkflowId) localStorage.setItem('workflow:selectedWorkflowId', selectedWorkflowId);
+    else localStorage.removeItem('workflow:selectedWorkflowId');
+  }, [selectedWorkflowId]);
 
   // Helper to find scope for a workflow
   const findScopeForWorkflow = useCallback((workflow: WorkflowType) => {

@@ -21,9 +21,11 @@ import { agentRuntime } from './agent-runtime-factory.js';
 import type { AgentConfig, ConversationEvent } from './agent-runtime.js';
 import type { AnyMCPServerConfig } from './claude-agent.service.js';
 import { createWorkflowProgressServer } from './workflow-progress-mcp.js';
-import { provisionWorkflowWorkspace } from './workflow-workspace.js';
+import { provisionWorkflowWorkspace, snapshotWorkspaceToS3, restoreWorkspaceFromSnapshot } from './workflow-workspace.js';
+import { workspaceManager } from './workspace-manager.js';
 import { checkpointService, type CheckpointType } from './checkpoint.service.js';
 import { prisma } from '../config/database.js';
+import { config } from '../config/index.js';
 import { recordTokenUsage } from './token-usage.service.js';
 
 // ---------------------------------------------------------------------------
@@ -512,6 +514,26 @@ export class WorkflowExecutorV2 {
     if (firstSegment?.checkpointNodeId) {
       const checkpointNode = plan.nodes.find(n => n.id === firstSegment.checkpointNodeId);
       if (checkpointNode && executionId) {
+        // Snapshot workspace to S3 before pausing so it can be restored on resume
+        try {
+          const exec = await prisma.workflow_executions.findUnique({ where: { id: executionId } });
+          if (exec?.workspace_session_id && exec?.workspace_scope_id) {
+            const wsPath = workspaceManager.getSessionWorkspacePath(
+              organizationId, exec.workspace_scope_id, exec.workspace_session_id,
+            );
+            // In agentcore mode, sync files from agentcore S3 path to local first
+            // so that both the snapshot and the workspace file browser have the latest files.
+            if (config.agentRuntime === 'agentcore') {
+              await workspaceManager.ensureS3SyncedToLocal(
+                organizationId, exec.workspace_scope_id, exec.workspace_session_id,
+              );
+            }
+            await snapshotWorkspaceToS3(wsPath, executionId);
+          }
+        } catch (err) {
+          console.warn('[workflow-v2] Workspace snapshot failed (non-fatal):', err instanceof Error ? err.message : err);
+        }
+
         const inputContext = await checkpointService.buildInputContext(executionId);
         const checkpointType = (checkpointNode.checkpointConfig?.checkpointType as CheckpointType) || 'human_approval';
 
@@ -623,6 +645,21 @@ export class WorkflowExecutorV2 {
       };
     }
 
+    // Restore workspace snapshot from S3 (files produced by previous segments)
+    try {
+      if (execution.workspace_session_id && execution.workspace_scope_id) {
+        const wsPath = workspaceManager.getSessionWorkspacePath(
+          execution.organization_id, execution.workspace_scope_id, execution.workspace_session_id,
+        );
+        const restored = await restoreWorkspaceFromSnapshot(wsPath, executionId);
+        if (restored > 0) {
+          console.log(`[workflow-v2] Restored ${restored} workspace files from snapshot for execution ${executionId}`);
+        }
+      }
+    } catch (err) {
+      console.warn('[workflow-v2] Workspace restore failed (non-fatal):', err instanceof Error ? err.message : err);
+    }
+
     // Execute the segment with resume context
     yield* this.executeSegment(
       plan, segment, execution.organization_id, scopeId, execution.user_id,
@@ -634,6 +671,23 @@ export class WorkflowExecutorV2 {
     if (segment.checkpointNodeId) {
       const checkpointNode = plan.nodes.find(n => n.id === segment.checkpointNodeId);
       if (checkpointNode) {
+        // Snapshot workspace before pausing again
+        try {
+          if (execution.workspace_session_id && execution.workspace_scope_id) {
+            const wsPath = workspaceManager.getSessionWorkspacePath(
+              execution.organization_id, execution.workspace_scope_id, execution.workspace_session_id,
+            );
+            if (config.agentRuntime === 'agentcore') {
+              await workspaceManager.ensureS3SyncedToLocal(
+                execution.organization_id, execution.workspace_scope_id, execution.workspace_session_id,
+              );
+            }
+            await snapshotWorkspaceToS3(wsPath, executionId);
+          }
+        } catch (err) {
+          console.warn('[workflow-v2] Workspace snapshot failed (non-fatal):', err instanceof Error ? err.message : err);
+        }
+
         const inputContext = await checkpointService.buildInputContext(executionId);
         const cpType = (checkpointNode.checkpointConfig?.checkpointType as CheckpointType) || 'human_approval';
         const newCp = await checkpointService.create({

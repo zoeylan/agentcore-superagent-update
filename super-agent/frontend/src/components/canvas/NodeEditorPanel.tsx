@@ -12,6 +12,7 @@ import {
   GitBranch, 
   FileText, 
   Code,
+  UserCheck,
   Trash2,
   Plus,
 } from 'lucide-react';
@@ -42,7 +43,7 @@ const nodeTypeConfig: Record<CanvasNodeType, {
   agent: { icon: Bot, labelKey: 'nodeType.agent', color: 'text-blue-400' },
   start: { icon: Play, labelKey: 'nodeType.start', color: 'text-green-400' },
   end: { icon: Square, labelKey: 'nodeType.end', color: 'text-gray-400' },
-  humanApproval: { icon: Zap, labelKey: 'nodeType.humanApproval', color: 'text-purple-400' },
+  humanApproval: { icon: UserCheck, labelKey: 'nodeType.humanApproval', color: 'text-purple-400' },
   action: { icon: Zap, labelKey: 'nodeType.action', color: 'text-orange-400' },
   condition: { icon: GitBranch, labelKey: 'nodeType.condition', color: 'text-yellow-400' },
   document: { icon: FileText, labelKey: 'nodeType.document', color: 'text-cyan-400' },
@@ -186,6 +187,15 @@ export function NodeEditorPanel({
             onUpdate={(updates) => {
               onUpdate(node.id, updates);
               setIsDirty(false);
+            }} 
+          />
+        )}
+
+        {node.type === 'humanApproval' && (
+          <HumanApprovalNodeEditor 
+            node={node} 
+            onUpdate={(updates) => {
+              onUpdate(node.id, updates);
             }} 
           />
         )}
@@ -531,6 +541,167 @@ function ConditionNodeEditor({
         <p className="mt-1 text-xs text-gray-500">
           {t('editor.conditionHint')}
         </p>
+      </div>
+    </div>
+  );
+}
+
+// Human Approval Node Editor
+interface CheckpointConfig {
+  checkpointType: 'human_approval';
+  instructions: string;
+  approverRoles: string[];
+  expiresInSeconds: number;
+  timeoutAction: 'expire' | 'auto_approve';
+}
+
+const AVAILABLE_ROLES = ['admin', 'owner', 'member'] as const;
+const DEFAULT_TIMEOUT_HOURS = 72;
+
+function HumanApprovalNodeEditor({ 
+  node, 
+  onUpdate 
+}: { 
+  node: CanvasNode; 
+  onUpdate: (updates: Partial<CanvasNode['data']>) => void;
+}) {
+  const metadata = node.data.metadata as Record<string, unknown> | undefined;
+  const existingConfig = metadata?.checkpointConfig as CheckpointConfig | undefined;
+
+  const [instructions, setInstructions] = useState(existingConfig?.instructions || '');
+  const [approverRoles, setApproverRoles] = useState<string[]>(
+    existingConfig?.approverRoles || ['admin', 'owner']
+  );
+  const [timeoutHours, setTimeoutHours] = useState(
+    existingConfig?.expiresInSeconds 
+      ? Math.round(existingConfig.expiresInSeconds / 3600) 
+      : DEFAULT_TIMEOUT_HOURS
+  );
+  const [timeoutAction, setTimeoutAction] = useState<'expire' | 'auto_approve'>(
+    existingConfig?.timeoutAction || 'expire'
+  );
+  const { t } = useTranslation();
+
+  // Sync local state when a different node is selected
+  useEffect(() => {
+    const meta = node.data.metadata as Record<string, unknown> | undefined;
+    const config = meta?.checkpointConfig as CheckpointConfig | undefined;
+    setInstructions(config?.instructions || '');
+    setApproverRoles(config?.approverRoles || ['admin', 'owner']);
+    setTimeoutHours(config?.expiresInSeconds ? Math.round(config.expiresInSeconds / 3600) : DEFAULT_TIMEOUT_HOURS);
+    setTimeoutAction(config?.timeoutAction || 'expire');
+  }, [node.id]);
+
+  const saveConfig = useCallback((updates: Partial<CheckpointConfig>) => {
+    const newConfig: CheckpointConfig = {
+      checkpointType: 'human_approval',
+      instructions: updates.instructions ?? instructions,
+      approverRoles: updates.approverRoles ?? approverRoles,
+      expiresInSeconds: (updates.expiresInSeconds ?? timeoutHours * 3600),
+      timeoutAction: updates.timeoutAction ?? timeoutAction,
+    };
+    onUpdate({
+      metadata: {
+        ...metadata,
+        checkpointConfig: newConfig,
+      },
+    });
+  }, [instructions, approverRoles, timeoutHours, timeoutAction, metadata, onUpdate]);
+
+  const handleInstructionsChange = (value: string) => {
+    setInstructions(value);
+    saveConfig({ instructions: value });
+  };
+
+  const handleRoleToggle = (role: string) => {
+    const updated = approverRoles.includes(role)
+      ? approverRoles.filter(r => r !== role)
+      : [...approverRoles, role];
+    setApproverRoles(updated);
+    saveConfig({ approverRoles: updated });
+  };
+
+  const handleTimeoutChange = (value: number) => {
+    const hours = Math.max(1, value);
+    setTimeoutHours(hours);
+    saveConfig({ expiresInSeconds: hours * 3600 });
+  };
+
+  const handleTimeoutActionChange = (value: 'expire' | 'auto_approve') => {
+    setTimeoutAction(value);
+    saveConfig({ timeoutAction: value });
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Instructions */}
+      <div>
+        <label className="block text-sm font-medium text-gray-400 mb-2">
+          {t('approvalEditor.instructions')}
+        </label>
+        <textarea
+          value={instructions}
+          onChange={(e) => handleInstructionsChange(e.target.value)}
+          placeholder={t('approvalEditor.instructionsPlaceholder')}
+          className="w-full min-h-[100px] px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none text-sm resize-none"
+        />
+      </div>
+
+      {/* Approver Roles */}
+      <div>
+        <label className="block text-sm font-medium text-gray-400 mb-2">
+          {t('approvalEditor.approverRoles')}
+        </label>
+        <div className="space-y-2">
+          {AVAILABLE_ROLES.map((role) => (
+            <label key={role} className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={approverRoles.includes(role)}
+                onChange={() => handleRoleToggle(role)}
+                className="rounded border-gray-600 bg-gray-800 text-purple-500 focus:ring-purple-500"
+              />
+              <span className="text-sm text-gray-300">
+                {t(`approvalEditor.role.${role}`)}
+              </span>
+            </label>
+          ))}
+        </div>
+        <p className="mt-1 text-xs text-gray-500">
+          {t('approvalEditor.approverRolesHint')}
+        </p>
+      </div>
+
+      {/* Timeout */}
+      <div>
+        <label className="block text-sm font-medium text-gray-400 mb-2">
+          {t('approvalEditor.timeout')}
+        </label>
+        <input
+          type="number"
+          value={timeoutHours}
+          onChange={(e) => handleTimeoutChange(parseInt(e.target.value) || DEFAULT_TIMEOUT_HOURS)}
+          min={1}
+          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none text-sm"
+        />
+        <p className="mt-1 text-xs text-gray-500">
+          {t('approvalEditor.timeoutHint')}
+        </p>
+      </div>
+
+      {/* Timeout Action */}
+      <div>
+        <label className="block text-sm font-medium text-gray-400 mb-2">
+          {t('approvalEditor.timeoutAction')}
+        </label>
+        <select
+          value={timeoutAction}
+          onChange={(e) => handleTimeoutActionChange(e.target.value as 'expire' | 'auto_approve')}
+          className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500 outline-none text-sm"
+        >
+          <option value="expire">{t('approvalEditor.timeoutAction.expire')}</option>
+          <option value="auto_approve">{t('approvalEditor.timeoutAction.autoApprove')}</option>
+        </select>
       </div>
     </div>
   );

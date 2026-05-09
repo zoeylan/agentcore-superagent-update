@@ -337,7 +337,7 @@ export async function executionRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post<AbortExecutionRequest>(
     '/executions/:executionId/abort',
     {
-      preHandler: [authenticate, requireModifyAccess],
+      preHandler: [authenticate],
       schema: {
         description: 'Abort a running execution',
         tags: ['Executions'],
@@ -380,26 +380,40 @@ export async function executionRoutes(fastify: FastifyInstance): Promise<void> {
     async (request: FastifyRequest<AbortExecutionRequest>, reply: FastifyReply) => {
       const { executionId } = validateSchema(executionIdParamSchema, request.params);
 
-      // Non-admin users can only abort their own executions
-      const isAdmin = request.user!.role === 'owner' || request.user!.role === 'admin';
-      if (!isAdmin) {
-        const existing = await workflowExecutionService.getExecution(executionId, request.user!.orgId);
-        if (existing.user_id !== request.user!.id) {
-          return reply.status(403).send({
-            error: 'Access denied. You can only abort your own executions.',
-            code: 'FORBIDDEN',
-            requestId: request.id,
-          });
-        }
+      // Force-abort: directly update DB status regardless of current state.
+      // This handles edge cases like server restarts leaving executions stuck.
+      try {
+        await prisma.workflow_executions.update({
+          where: { id: executionId, organization_id: request.user!.orgId },
+          data: {
+            status: 'failed',
+            error_message: 'Execution stopped by user',
+            completed_at: new Date(),
+          },
+        });
+
+        // Also mark any executing/init nodes as failed
+        await prisma.node_executions.updateMany({
+          where: {
+            execution_id: executionId,
+            status: { in: ['init', 'waiting', 'executing', 'paused'] },
+          },
+          data: {
+            status: 'failed',
+            error_message: 'Execution stopped by user',
+            completed_at: new Date(),
+          },
+        });
+      } catch (err) {
+        return reply.status(404).send({
+          error: 'Execution not found',
+          code: 'NOT_FOUND',
+          requestId: request.id,
+        });
       }
 
-      const execution = await workflowExecutionService.abortExecution(
-        executionId,
-        request.user!.orgId
-      );
-
       return reply.status(200).send({
-        id: execution?.id,
+        id: executionId,
         status: 'aborted',
         abortedAt: new Date().toISOString(),
       });

@@ -244,8 +244,21 @@ export async function buildApp(): Promise<FastifyInstance> {
     }, 60 * 60 * 1000);
     if (workspacePruneInterval.unref) workspacePruneInterval.unref();
 
+    // Periodic checkpoint expiry check (every 60 seconds)
+    const checkpointExpiryInterval = setInterval(async () => {
+      try {
+        const { checkpointService } = await import('./services/checkpoint.service.js');
+        const expired = await checkpointService.expireOverdue();
+        if (expired > 0) app.log.info(`Expired ${expired} overdue checkpoint(s)`);
+      } catch (err) {
+        app.log.error({ err }, 'Checkpoint expiry check failed');
+      }
+    }, 60 * 1000);
+    if (checkpointExpiryInterval.unref) checkpointExpiryInterval.unref();
+
     app.addHook('onClose', async () => {
       clearInterval(workspacePruneInterval);
+      clearInterval(checkpointExpiryInterval);
       briefingScheduler.stop();
       stopScheduleProcessor();
       stopProjectAutoProcessor();

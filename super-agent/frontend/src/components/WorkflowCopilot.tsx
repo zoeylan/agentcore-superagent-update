@@ -167,6 +167,7 @@ function fixUnescapedControlChars(json: string): string {
   // Walk the string character by character, tracking whether we're inside a JSON string value.
   // Replace raw control characters (U+0000–U+001F) with their escaped forms.
   // All characters in this range are illegal unescaped inside JSON strings.
+  // Also fix unescaped double quotes inside string values (common LLM output issue).
   const out: string[] = []
   let inString = false
   let escaped = false
@@ -183,8 +184,27 @@ function fixUnescapedControlChars(json: string): string {
       continue
     }
     if (ch === '"') {
-      inString = !inString
-      out.push(ch)
+      if (!inString) {
+        // Opening quote — enter string
+        inString = true
+        out.push(ch)
+        continue
+      }
+      // We're inside a string and hit a quote. Is this the real closing quote
+      // or an unescaped quote inside the value?
+      // Heuristic: if the next non-whitespace char is a JSON structural character
+      // (: , } ]) then this is the real closing quote. Otherwise, escape it.
+      let j = i + 1
+      while (j < json.length && (json[j] === ' ' || json[j] === '\t' || json[j] === '\r' || json[j] === '\n')) j++
+      const nextChar = json[j]
+      if (nextChar === ':' || nextChar === ',' || nextChar === '}' || nextChar === ']' || nextChar === undefined) {
+        // Real closing quote
+        inString = false
+        out.push(ch)
+      } else {
+        // Unescaped quote inside string value — escape it
+        out.push('\\"')
+      }
       continue
     }
     if (inString) {
@@ -221,7 +241,7 @@ function parseWorkflowPlan(text: string): WorkflowPlan {
   if (!parsed.title || !Array.isArray(parsed.tasks)) {
     throw new Error('Invalid workflow plan: missing title or tasks')
   }
-  const validTypes = new Set(['agent', 'action', 'condition', 'document', 'codeArtifact'])
+  const validTypes = new Set(['agent', 'action', 'condition', 'document', 'codeArtifact', 'humanApproval'])
   return {
     title: parsed.title,
     description: parsed.description,

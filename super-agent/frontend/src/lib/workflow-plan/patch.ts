@@ -410,7 +410,7 @@ function validateAndSanitizePatches(
  * Check if a task type is valid
  */
 function isValidTaskType(type: string): type is WorkflowTask['type'] {
-  return ['agent', 'action', 'condition', 'document', 'codeArtifact'].includes(type);
+  return ['agent', 'action', 'condition', 'document', 'codeArtifact', 'humanApproval'].includes(type);
 }
 
 /**

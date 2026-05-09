@@ -10,9 +10,11 @@ import {
   Star,
   Headphones,
   Database,
+  ClipboardCheck,
 } from 'lucide-react'
 import type { NavigationPage } from '@/types'
 import { useTranslation } from '@/i18n'
+import { usePendingApprovals } from '@/hooks/usePendingApprovals'
 
 interface NavItemConfig {
   id: NavigationPage
@@ -39,6 +41,12 @@ const navItems: NavItemConfig[] = [
     icon: <GitBranch className="w-5 h-5" />,
     tooltipKey: 'nav.workflow',
     path: '/workflow',
+  },
+  {
+    id: 'approvals',
+    icon: <ClipboardCheck className="w-5 h-5" />,
+    tooltipKey: 'nav.approvals',
+    path: '/approvals',
   },
   {
     id: 'agents',
@@ -93,12 +101,14 @@ export function Sidebar({ onAvatarClick, isAdminMenuOpen }: SidebarProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const { t } = useTranslation()
+  const { pendingCount } = usePendingApprovals()
 
   const getActivePage = (): NavigationPage => {
     const path = location.pathname
     if (path === '/') return 'dashboard'
     if (path.startsWith('/chat')) return 'chat'
     if (path.startsWith('/workflow')) return 'workflow'
+    if (path.startsWith('/approvals')) return 'approvals'
     if (path.startsWith('/agents')) return 'agents'
     if (path.startsWith('/projects')) return 'projects'
     if (path.startsWith('/tools')) return 'tools'
@@ -142,6 +152,12 @@ export function Sidebar({ onAvatarClick, isAdminMenuOpen }: SidebarProps) {
               title={t(item.tooltipKey)}
             >
               {item.icon}
+              {/* Pending approvals badge */}
+              {item.id === 'approvals' && pendingCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full">
+                  {pendingCount > 99 ? '99+' : pendingCount}
+                </span>
+              )}
               {/* Active indicator */}
               {isActive && (
                 <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-blue-400 rounded-r-full" />

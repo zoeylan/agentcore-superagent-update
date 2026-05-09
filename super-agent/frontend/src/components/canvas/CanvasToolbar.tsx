@@ -11,6 +11,7 @@ import {
   Zap, 
   GitBranch,
   Square,
+  UserCheck,
   Plus,
   ChevronDown,
 } from 'lucide-react';
@@ -33,6 +34,7 @@ const nodeTypeOptions: NodeTypeOption[] = [
   { type: 'agent', labelKey: 'canvas.nodeAgent', icon: Bot, color: 'text-blue-400 bg-blue-500/20 hover:bg-blue-500/30', descKey: 'canvas.nodeAgentDesc' },
   { type: 'start', labelKey: 'canvas.nodeStart', icon: Play, color: 'text-green-400 bg-green-500/20 hover:bg-green-500/30', descKey: 'canvas.nodeStartDesc' },
   { type: 'action', labelKey: 'canvas.nodeAction', icon: Zap, color: 'text-orange-400 bg-orange-500/20 hover:bg-orange-500/30', descKey: 'canvas.nodeActionDesc' },
+  { type: 'humanApproval', labelKey: 'canvas.nodeHumanApproval', icon: UserCheck, color: 'text-purple-400 bg-purple-500/20 hover:bg-purple-500/30', descKey: 'canvas.nodeHumanApprovalDesc' },
   { type: 'condition', labelKey: 'canvas.nodeCondition', icon: GitBranch, color: 'text-yellow-400 bg-yellow-500/20 hover:bg-yellow-500/30', descKey: 'canvas.nodeConditionDesc' },
   { type: 'document', labelKey: 'canvas.nodeDocument', icon: FileText, color: 'text-cyan-400 bg-cyan-500/20 hover:bg-cyan-500/30', descKey: 'canvas.nodeDocumentDesc' },
   { type: 'codeArtifact', labelKey: 'canvas.nodeCode', icon: Code, color: 'text-pink-400 bg-pink-500/20 hover:bg-pink-500/30', descKey: 'canvas.nodeCodeDesc' },

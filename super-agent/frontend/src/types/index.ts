@@ -2,7 +2,7 @@
 export * from './canvas'
 
 // Navigation Types
-export type NavigationPage = 'dashboard' | 'chat' | 'workflow' | 'agents' | 'projects' | 'tools' | 'knowledge' | 'apps' | 'starred' | 'support'
+export type NavigationPage = 'dashboard' | 'chat' | 'workflow' | 'approvals' | 'agents' | 'projects' | 'tools' | 'knowledge' | 'apps' | 'starred' | 'support'
 
 export interface NavItem {
   id: NavigationPage
@@ -137,7 +137,7 @@ export interface QuickQuestion {
 
 // Workflow Types
 export type WorkflowCategory = 'hr' | 'deployment' | 'marketing' | 'support'
-export type NodeType = 'trigger' | 'agent' | 'human' | 'action' | 'condition' | 'document' | 'codeArtifact' | 'resource' | 'loop' | 'parallel' | 'start' | 'end'
+export type NodeType = 'trigger' | 'agent' | 'human' | 'humanApproval' | 'action' | 'condition' | 'document' | 'codeArtifact' | 'resource' | 'loop' | 'parallel' | 'start' | 'end'
 
 export interface Position {
   x: number

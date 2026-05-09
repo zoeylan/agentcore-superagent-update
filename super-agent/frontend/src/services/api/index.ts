@@ -139,3 +139,12 @@ export const MCPService = RestMCPService;
 export const ChatService = RestChatService;
 export const OrganizationService = RestOrganizationService;
 export const BusinessScopeService = RestBusinessScopeService;
+
+// Approval Service
+export { RestApprovalService } from './restApprovalService';
+export type {
+  Checkpoint,
+  CheckpointConfig,
+  CheckpointInputContext,
+  CheckpointStatus,
+} from './restApprovalService';

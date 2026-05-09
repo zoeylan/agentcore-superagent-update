@@ -39,7 +39,8 @@ export type ActionStatus =
   | 'waiting'
   | 'executing'
   | 'finish'
-  | 'failed';
+  | 'failed'
+  | 'paused';
 
 /**
  * Workflow execution status
@@ -49,7 +50,8 @@ export type WorkflowExecutionStatus =
   | 'executing'
   | 'finish'
   | 'failed'
-  | 'aborted';
+  | 'aborted'
+  | 'paused';
 
 /**
  * Position in canvas
@@ -263,7 +265,8 @@ export type WorkflowEventType =
   | 'node:started'
   | 'node:progress'
   | 'node:completed'
-  | 'node:failed';
+  | 'node:failed'
+  | 'node:paused';
 
 /**
  * Workflow event payload
