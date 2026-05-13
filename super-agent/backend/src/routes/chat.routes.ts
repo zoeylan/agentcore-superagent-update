@@ -189,6 +189,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
             model: { type: 'string' },
             context: { type: 'object' },
             attached_files: { type: 'array', items: { type: 'string' } },
+            attached_images: { type: 'array', items: { type: 'string' } },
           },
         },
         response: {
@@ -240,6 +241,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
         model: data.model,
         context: data.context,
         attachedFiles: data.attached_files,
+        attachedImages: data.attached_images,
       });
     }
   );
@@ -688,6 +690,7 @@ export async function chatRoutes(fastify: FastifyInstance): Promise<void> {
                 session_id: { type: 'string' },
                 type: { type: 'string', enum: ['user', 'ai'] },
                 content: { type: 'string' },
+                metadata: { type: 'object', additionalProperties: true },
                 created_at: { type: 'string' },
               },
             },

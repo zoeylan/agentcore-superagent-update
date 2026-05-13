@@ -298,8 +298,9 @@ export class WorkspaceManager {
 
     await Promise.all([
       this.generateScopeClaudeMd(workspacePath, scope, selectedAgentId, userId),
+      this.writeScopeSystemPromptFile(workspacePath, scope),
       this.generateAgentSubagentFiles(agentsDir, scope.agents, skillsDir),
-      this.generateSettings(workspacePath, scope.mcpServers),
+      this.generateSettings(workspacePath, scope.mcpServers, scope.settings),
       this.writeMemoryFiles(workspacePath, scope.id, userId),
       createDocGroupSymlinks(),
       downloadAllSkills(),
@@ -409,6 +410,9 @@ export class WorkspaceManager {
     // 1. Regenerate CLAUDE.md
     await this.generateScopeClaudeMd(workspacePath, scope, selectedAgentId, userId);
 
+    // 1a. Refresh scope system prompt file
+    await this.writeScopeSystemPromptFile(workspacePath, scope);
+
     // 1b. Refresh memory files
     await this.writeMemoryFiles(workspacePath, scope.id, userId);
 
@@ -422,7 +426,7 @@ export class WorkspaceManager {
     await this.syncSkills(workspacePath, manifest.skills, scope.skills);
 
     // 4. Regenerate settings
-    await this.generateSettings(workspacePath, scope.mcpServers);
+    await this.generateSettings(workspacePath, scope.mcpServers, scope.settings);
 
     // 5. Sync document group symlinks
     const docGroups = scope.documentGroups ?? [];
@@ -494,6 +498,32 @@ export class WorkspaceManager {
   // File generators
   // =========================================================================
 
+  /**
+   * Write (or overwrite) the scope system prompt file into the workspace.
+   *
+   * The agent can edit this file during a session; carry-forward will pick up
+   * the change and persist it to `business_scopes.system_prompt`.
+   */
+  async writeScopeSystemPromptFile(workspacePath: string, scope: ScopeForWorkspace): Promise<void> {
+    const dir = join(workspacePath, '.claude');
+    await mkdir(dir, { recursive: true });
+    const body = (scope.systemPrompt ?? '').trim();
+    const lines = [
+      '---',
+      `scopeId: ${scope.id}`,
+      `scopeName: ${scope.name}`,
+      'title: Scope System Prompt',
+      '---',
+      '',
+      '<!-- Edit the prose below to evolve the scope-level system prompt. -->',
+      '<!-- Everything above the closing --- is metadata and will be stripped on carry-forward. -->',
+      '',
+      body,
+      '',
+    ];
+    await writeFile(join(dir, 'scope-system-prompt.md'), lines.join('\n'), 'utf-8');
+  }
+
   /** Generate CLAUDE.md at workspace root with scope context. */
   async generateScopeClaudeMd(
     workspacePath: string,
@@ -511,6 +541,13 @@ export class WorkspaceManager {
       lines.push('## Scope Instructions', '');
       lines.push(scope.systemPrompt, '');
     }
+
+    // Tell the agent how to evolve the scope system prompt
+    lines.push('## Evolving the System Prompt', '');
+    lines.push('The scope-level system prompt is mirrored to `.claude/scope-system-prompt.md` for easy editing.');
+    lines.push('To refine the way this scope operates (role, behavior, defaults), edit that file directly.');
+    lines.push('Changes to `.claude/scope-system-prompt.md` will be carried forward to the scope persistent config after this session.');
+    lines.push('');
 
     if (scope.agents.length > 0) {
       lines.push('## Available Agents', '');
@@ -608,6 +645,19 @@ export class WorkspaceManager {
     lines.push('');
     lines.push('These files are managed by the system — do not edit them.');
     lines.push('');
+
+    // Custom section marker — content below this line is preserved across sessions
+    // via carry-forward. Agent can add custom rules/instructions below.
+    lines.push('<!-- CUSTOM_SECTION: Agent-generated rules below -->');
+    lines.push('');
+
+    // Append any previously carried custom CLAUDE.md content from scope settings
+    const scopeSettings = scope.settings as Record<string, unknown> | null;
+    const customClaudeMd = scopeSettings?.customClaudeMd as string | undefined;
+    if (customClaudeMd) {
+      lines.push(customClaudeMd);
+      lines.push('');
+    }
 
     await writeFile(join(workspacePath, 'CLAUDE.md'), lines.join('\n'), 'utf-8');
   }
@@ -732,7 +782,7 @@ export class WorkspaceManager {
   }
 
   /** Generate .claude/settings.json with permissions and optional MCP servers. */
-  async generateSettings(workspacePath: string, mcpServers?: McpServerForWorkspace[]): Promise<void> {
+  async generateSettings(workspacePath: string, mcpServers?: McpServerForWorkspace[], scopeSettings?: Record<string, unknown> | null): Promise<void> {
     const settings: Record<string, unknown> = {
       permissions: {
         allow: ['Read', 'Write', 'Edit', 'Bash', 'Grep', 'Glob', 'Skill', 'WebFetch'],
@@ -792,6 +842,11 @@ export class WorkspaceManager {
 
     if (Object.keys(mcpConfig).length > 0) {
       settings.mcpServers = mcpConfig;
+    }
+
+    // Include hooks from scope settings (carried forward from previous sessions)
+    if (scopeSettings?.hooks && typeof scopeSettings.hooks === 'object') {
+      settings.hooks = scopeSettings.hooks;
     }
 
     const settingsDir = join(workspacePath, '.claude');
@@ -1146,7 +1201,7 @@ export class WorkspaceManager {
           '.next', '.nuxt', '.turbo', '.cache', '.parcel-cache',
           'bower_components', '.gradle', 'target', '.cargo',
         ]);
-        if (SKIP_SEGMENTS.has(firstSegment)) continue;
+        if (SKIP_SEGMENTS.has(firstSegment!)) continue;
 
         const localPath = join(localDir, relativePath);
         const localDirPath = dirname(localPath);

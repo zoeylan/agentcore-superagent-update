@@ -8,7 +8,24 @@
 import type { Message } from '@/types'
 import type { ContentBlock } from '@/services/chatStreamService'
 import { streamChat, type ChatStreamHandle } from '@/services/chatStreamService'
-import { restClient } from '@/services/api/restClient'
+import { restClient, getAuthToken } from '@/services/api/restClient'
+
+/**
+ * Convert workspace file paths to raw-file URLs for <img src> rendering.
+ * Same logic as mapApiMessageToMessage in restChatService.ts — used for
+ * fresh (in-memory) messages so they display immediately without waiting
+ * for a round-trip to the backend.
+ */
+function buildAttachedImageUrls(sessionId: string, paths: string[] | undefined): string[] | undefined {
+  if (!paths || paths.length === 0) return undefined
+  const baseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
+  const token = getAuthToken()
+  return paths.map((path) => {
+    const qs = new URLSearchParams({ path })
+    if (token) qs.set('token', token)
+    return `${baseUrl}/api/chat/sessions/${sessionId}/workspace/file/raw?${qs}`
+  })
+}
 
 export interface SessionState {
   sessionId: string
@@ -100,6 +117,7 @@ class SessionStreamManager {
       model?: string
       sopContext: string
       attachedFiles?: string[]
+      attachedImages?: string[]
     }
   ): void {
     const state = this.getSession(sessionId)
@@ -109,6 +127,7 @@ class SessionStreamManager {
       type: 'user',
       content: content.trim(),
       timestamp: new Date(),
+      attachedImages: buildAttachedImageUrls(sessionId, options.attachedImages),
     }
 
     const aiMessageId = `ai-${Date.now()}`
@@ -137,6 +156,7 @@ class SessionStreamManager {
         model: options.model,
         context: { sop_context: options.sopContext },
         attachedFiles: options.attachedFiles,
+        attachedImages: options.attachedImages,
       },
       {
         onAssistant: (event) => {

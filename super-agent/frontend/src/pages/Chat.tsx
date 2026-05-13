@@ -1307,9 +1307,10 @@ function UploadModal({ open, onClose, onConfirm }: {
 // ============================================================================
 
 interface MessageInputProps {
-  onSend: (message: string, mentionAgentId?: string) => void
+  onSend: (message: string, mentionAgentId?: string, attachedImages?: string[]) => void
   onStop: () => void
-  onUpload: (files: File[]) => void
+  /** Upload files and return the workspace paths of successfully uploaded files. */
+  onUpload: (files: File[]) => Promise<string[]>
   sessionId: string | null
   businessScopeId: string | null
   disabled?: boolean
@@ -1531,21 +1532,38 @@ function MessageInput({ onSend, onStop, onUpload, sessionId, businessScopeId, di
     }
   }, [allFiles, businessScopeId, mentionedAgent, dismissAc, dismissMention])
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if ((input.trim() || pastedImages.length > 0) && !disabled) {
-      // Upload pasted images first, then send the message
-      if (pastedImages.length > 0) {
-        onUpload([...pastedImages])
-      }
-      if (input.trim()) {
-        onSend(input.trim(), mentionedAgent?.id)
-      }
+      const messageContent = input.trim()
+
+      // Snapshot inputs before clearing them, so an async upload doesn't
+      // see empty state.
+      const imagesToUpload = pastedImages.length > 0 ? [...pastedImages] : []
+
+      // Clear input immediately so UX feels snappy; upload runs in background.
       setInput('')
+      const mentionAgent = mentionedAgent
       setMentionedAgent(null)
       setPastedImages([])
       setPastedPreviews(prev => { prev.forEach(url => URL.revokeObjectURL(url)); return [] })
       dismissAc()
       dismissMention()
+
+      // If there are images, upload first to get workspace paths, then send.
+      // The workspace paths are persisted with the message for history display.
+      let attachedImagePaths: string[] | undefined
+      if (imagesToUpload.length > 0) {
+        try {
+          const paths = await onUpload(imagesToUpload)
+          if (paths.length > 0) attachedImagePaths = paths
+        } catch (err) {
+          console.error('Image upload failed:', err)
+        }
+      }
+
+      if (messageContent) {
+        onSend(messageContent, mentionAgent?.id, attachedImagePaths)
+      }
     }
   }, [input, pastedImages, disabled, onSend, onUpload, mentionedAgent, dismissAc, dismissMention])
 
@@ -1804,8 +1822,13 @@ function ChatInterfaceContent() {
     const params = new URLSearchParams(window.location.search)
     const prompt = params.get('prompt')
     // Send when: we have a prompt, loading is done, not already sending,
-    // and no existing backend session (fresh state from showcase).
-    if (prompt && !isLoading && !isSending && !backendSessionId) {
+    // scope is selected (required by sendMessage), and no existing messages
+    // (fresh session from showcase). We intentionally don't check backendSessionId
+    // because ChatContext eagerly creates a session on mount, which would cause
+    // a race: if ensureSession completes before isLoading flips false, backendSessionId
+    // gets set and this effect skips forever. Checking messages.length === 0 is a
+    // more reliable signal that this is a fresh session ready for the showcase prompt.
+    if (prompt && !isLoading && !isSending && selectedBusinessScopeId && messages.length === 0) {
       autoPromptSent.current = true
       // Clean the URL so refreshing doesn't re-send
       const cleanParams = new URLSearchParams(window.location.search)
@@ -1815,7 +1838,7 @@ function ChatInterfaceContent() {
       window.history.replaceState({}, '', cleanUrl)
       sendMessage(prompt)
     }
-  }, [isLoading, isSending, backendSessionId, sendMessage])
+  }, [isLoading, isSending, selectedBusinessScopeId, messages.length, sendMessage])
 
   // Track workspace + session refresh — increment after each completed response
   const [wsRefreshKey, setWsRefreshKey] = useState(0)
@@ -1946,7 +1969,7 @@ function ChatInterfaceContent() {
     setSessionRefreshKey(k => k + 1)
   }, [startNewSession])
 
-  const handleSendMessage = useCallback(async (content: string, mentionAgentId?: string) => {
+  const handleSendMessage = useCallback(async (content: string, mentionAgentId?: string, attachedImages?: string[]) => {
     // Switch to chat tab when sending a message
     setActiveTab('chat')
     // Include recently uploaded files as context, then clear the list
@@ -1954,11 +1977,11 @@ function ChatInterfaceContent() {
       ? [...recentlyUploadedFilesRef.current]
       : undefined
     recentlyUploadedFilesRef.current = []
-    await sendMessage(content, mentionAgentId, files)
+    await sendMessage(content, mentionAgentId, files, attachedImages)
   }, [sendMessage])
 
-  const handleUploadFile = useCallback(async (files: File[]) => {
-    if (!backendSessionId || files.length === 0) return
+  const handleUploadFile = useCallback(async (files: File[]): Promise<string[]> => {
+    if (!backendSessionId || files.length === 0) return []
 
     const { success: showSuccess, error: showError } = toastRef.current
 
@@ -2014,6 +2037,7 @@ function ChatInterfaceContent() {
     }
 
     setWsRefreshKey(k => k + 1)
+    return uploadedNames
   }, [backendSessionId])
 
   const handleQuickQuestionClick = useCallback((question: QuickQuestion) => {

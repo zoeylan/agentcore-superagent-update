@@ -42,9 +42,30 @@ function UserBubble({ message }: { message: Message }) {
         <User className="w-4 h-4 text-blue-400" />
       </div>
       <div className="flex flex-col max-w-[70%] items-end">
-        <div className="px-4 py-2 rounded-2xl bg-blue-600/15 border border-blue-500/20 text-white rounded-br-md">
-          <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-        </div>
+        {message.attachedImages && message.attachedImages.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2 justify-end">
+            {message.attachedImages.map((url, i) => (
+              <a
+                key={i}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block"
+              >
+                <img
+                  src={url}
+                  alt={`attachment ${i + 1}`}
+                  className="max-w-[200px] max-h-[200px] object-cover rounded-lg border border-blue-500/20 hover:border-blue-400/50 transition-colors cursor-pointer"
+                />
+              </a>
+            ))}
+          </div>
+        )}
+        {message.content && (
+          <div className="px-4 py-2 rounded-2xl bg-blue-600/15 border border-blue-500/20 text-white rounded-br-md">
+            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+          </div>
+        )}
         <span className="text-xs text-gray-500 mt-1 px-1">
           {formatTime(message.timestamp)}
         </span>

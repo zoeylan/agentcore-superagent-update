@@ -89,6 +89,8 @@ export const chatStreamRequestSchema = z.object({
   context: z.record(z.string(), z.unknown()).optional(),
   /** File names recently uploaded by the user (injected as context for the agent). */
   attached_files: z.array(z.string()).optional(),
+  /** Workspace paths of images attached (for display in chat history). */
+  attached_images: z.array(z.string()).optional(),
 });
 
 /**

@@ -12,5 +12,6 @@ ALTER COLUMN "a2a_exposed_skills" SET DEFAULT ARRAY[]::TEXT[];
 -- AlterTable
 ALTER TABLE "chat_sessions" ALTER COLUMN "swarm_mode" SET NOT NULL;
 
--- CreateIndex
+-- CreateIndex (drop partial index from previous migration, replace with standard index)
+DROP INDEX IF EXISTS "agents_a2a_enabled_idx";
 CREATE INDEX "agents_a2a_enabled_idx" ON "agents"("a2a_enabled");

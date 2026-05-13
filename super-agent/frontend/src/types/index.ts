@@ -95,6 +95,8 @@ export interface Message {
   speakerAgentAvatar?: string | null
   /** Model ID used for this response (e.g. claude-sonnet-4-20250514) */
   model?: string
+  /** Attached image URLs (blob: URLs from clipboard paste, or backend URLs for persisted images) */
+  attachedImages?: string[]
   /** Token usage stats from the result event */
   tokenUsage?: {
     input_tokens: number

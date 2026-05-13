@@ -134,6 +134,8 @@ export interface StreamChatOptions {
   context?: Record<string, unknown>;
   /** File names recently uploaded by the user (injected as context for the agent). */
   attachedFiles?: string[];
+  /** Workspace paths of images attached (stored in message metadata for display). */
+  attachedImages?: string[];
 }
 
 /**
@@ -384,6 +386,9 @@ export function streamChat(
       }
       if (options.attachedFiles && options.attachedFiles.length > 0) {
         body.attached_files = options.attachedFiles;
+      }
+      if (options.attachedImages && options.attachedImages.length > 0) {
+        body.attached_images = options.attachedImages;
       }
 
       const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {

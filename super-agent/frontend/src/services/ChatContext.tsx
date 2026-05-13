@@ -31,7 +31,7 @@ export interface ChatSessionState {
 }
 
 export interface ChatContextType extends ChatSessionState {
-  sendMessage: (content: string, mentionAgentId?: string, attachedFiles?: string[]) => Promise<Message | null>
+  sendMessage: (content: string, mentionAgentId?: string, attachedFiles?: string[], attachedImages?: string[]) => Promise<Message | null>
   stopGeneration: () => void
   setActiveSop: (sopId: string) => void
   setSelectedAgent: (agentId: string | null) => void
@@ -67,7 +67,7 @@ const defaultState: ChatSessionState = {
 
 const defaultContext: ChatContextType = {
   ...defaultState,
-  sendMessage: async (_content: string, _mentionAgentId?: string, _attachedFiles?: string[]) => null,
+  sendMessage: async (_content: string, _mentionAgentId?: string, _attachedFiles?: string[], _attachedImages?: string[]) => null,
   stopGeneration: () => {},
   setActiveSop: () => {},
   setSelectedAgent: () => {},
@@ -194,9 +194,11 @@ export function ChatProvider({ children, initialSessionId, initialSop, initialAg
 
   // On mount, if we have a stored backend session, load it
   useEffect(() => {
+    console.log('[ChatContext mount] backendSessionId=', backendSessionId, 'scopeId=', selectedBusinessScopeId)
     if (backendSessionId) {
+      console.log('[ChatContext mount] Restoring existing session:', backendSessionId)
       // Load history and attempt reconnection
-      (async () => {
+      ;(async () => {
         try {
           if (shouldUseRestApi()) {
             RestChatService.setCurrentSessionId(backendSessionId)
@@ -222,14 +224,11 @@ export function ChatProvider({ children, initialSessionId, initialSop, initialAg
           console.warn('Failed to restore session on mount:', err)
         }
       })()
-    } else if (selectedBusinessScopeId && shouldUseRestApi()) {
-      // Eagerly create session + provision workspace on mount when we have a
-      // stored scope but no backend session yet.
-      RestChatService.ensureSession(activeSop, selectedBusinessScopeId).then(newSessionId => {
-        setBackendSessionId(newSessionId)
-      }).catch(err => {
-        console.warn('Failed to eagerly create session on mount:', err)
-      })
+    } else {
+      console.log('[ChatContext mount] No stored session — will create on first message send')
+      // Don't eagerly create a session here. Let sendMessage handle it via
+      // ensureSession. This avoids duplicate session creation from concurrent
+      // code paths (eager create + sendMessage both calling ensureSession).
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Run only on mount
@@ -300,7 +299,7 @@ export function ChatProvider({ children, initialSessionId, initialSop, initialAg
     }
   }, [backendSessionId])
 
-  const sendMessage = useCallback(async (content: string, mentionAgentId?: string, attachedFiles?: string[]): Promise<Message | null> => {
+  const sendMessage = useCallback(async (content: string, mentionAgentId?: string, attachedFiles?: string[], attachedImages?: string[]): Promise<Message | null> => {
     if (!content.trim()) {
       setError('Message cannot be empty')
       return null
@@ -325,6 +324,7 @@ export function ChatProvider({ children, initialSessionId, initialSop, initialAg
           model: selectedModel || undefined,
           sopContext: activeSop,
           attachedFiles: attachedFiles,
+          attachedImages: attachedImages,
         })
 
         return {
@@ -370,18 +370,8 @@ export function ChatProvider({ children, initialSessionId, initialSop, initialAg
     setBackendSessionId(null)
     if (shouldUseRestApi()) {
       RestChatService.resetSession()
-
-      // Eagerly create session + provision workspace when a scope is selected,
-      // so the workspace is ready by the time the user sends their first message.
-      if (newScopeId) {
-        console.log('[ChatContext] Eagerly creating session for scope:', newScopeId)
-        RestChatService.ensureSession(activeSop, newScopeId).then(newSessionId => {
-          console.log('[ChatContext] Eager session created:', newSessionId)
-          setBackendSessionId(newSessionId)
-        }).catch(err => {
-          console.warn('Failed to eagerly create session:', err)
-        })
-      }
+      // Session will be created on-demand when user sends first message.
+      // This avoids duplicate session creation from concurrent code paths.
     }
   }, [activeSop])
 

@@ -70,6 +70,8 @@ export interface ChatStreamOptions {
   context?: Record<string, unknown>;
   /** File names recently uploaded by the user (injected as context for the agent). */
   attachedFiles?: string[];
+  /** Workspace paths of images attached to this message (for display in chat history). */
+  attachedImages?: string[];
 }
 
 export interface ChatHistoryOptions {
@@ -600,6 +602,9 @@ export class ChatService {
     await Promise.all([
       this.addMessage(organizationId, sessionId, 'user', options.message, {
         mentionAgentId: options.mentionAgentId,
+        metadata: options.attachedImages && options.attachedImages.length > 0
+          ? { attachedImages: options.attachedImages }
+          : undefined,
       }),
       chatSessionRepository.updateStatus(sessionId, organizationId, 'generating'),
       agentStatusService.setBusy(resolvedAgentId, organizationId),

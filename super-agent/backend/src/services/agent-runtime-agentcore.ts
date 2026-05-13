@@ -12,10 +12,20 @@
 
 import { config } from '../config/index.js';
 import type { AgentRuntime, AgentRuntimeOptions } from './agent-runtime.js';
-import type { ConversationEvent, AgentConfig, ContentBlock, MCPServerSDKConfig } from './claude-agent.service.js';
+import type {
+  ConversationEvent,
+  AgentConfig,
+  ContentBlock,
+  MCPServerSDKConfig,
+} from './claude-agent.service.js';
 import { createToken } from '../middleware/auth.js';
 import type { SkillForWorkspace } from './workspace-manager.js';
-import { S3Client, PutObjectCommand, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  ListObjectsV2Command,
+  GetObjectCommand,
+} from '@aws-sdk/client-s3';
 import { createReadStream, statSync, createWriteStream } from 'fs';
 import { readdir, mkdir } from 'fs/promises';
 import { join, relative, dirname } from 'path';
@@ -67,12 +77,16 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
       // to ensure the client targets the correct region regardless of AWS_REGION.
       const arnRegion = config.agentcore.runtimeArn?.split(':')[3];
       const region = arnRegion || config.agentcore.region;
-      console.log(`[agentcore-runtime] SDK region=${region} (from ARN: ${arnRegion}, config: ${config.agentcore.region})`);
+      console.log(
+        `[agentcore-runtime] SDK region=${region} (from ARN: ${arnRegion}, config: ${config.agentcore.region})`
+      );
       this.runtimeClient = new mod.BedrockAgentCoreClient({ region });
       this.InvokeCommand = mod.InvokeAgentRuntimeCommand;
       this.sdkLoaded = true;
     } catch (err) {
-      throw new Error(`AgentCore SDK not available. Install @aws-sdk/client-bedrock-agentcore. Error: ${err}`);
+      throw new Error(
+        `AgentCore SDK not available. Install @aws-sdk/client-bedrock-agentcore. Error: ${err}`
+      );
     }
   }
 
@@ -87,7 +101,7 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
     agentConfig: AgentConfig,
     _skills: SkillForWorkspace[],
     _pluginPaths?: string[],
-    mcpServers?: Record<string, MCPServerSDKConfig>,
+    mcpServers?: Record<string, MCPServerSDKConfig>
   ): AsyncGenerator<ConversationEvent> {
     await this.ensureSDK();
 
@@ -98,7 +112,7 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
 
     const [history] = await Promise.all([
       this.loadChatHistory(options.organizationId, options.sessionId),
-      (chatSessionId && options.workspacePath)
+      chatSessionId && options.workspacePath
         ? this.uploadWorkspaceIfNeeded(chatSessionId, options.workspacePath, s3Prefix)
         : Promise.resolve(),
     ]);
@@ -147,17 +161,16 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
     });
 
     console.log(`[agentcore-runtime] S3 workspace: s3://${this.workspaceBucket}/${s3Prefix}`);
-    console.log(`[agentcore-runtime] History count: ${history.length}, workspacePath: ${options.workspacePath ?? 'none'}`);
+    console.log(
+      `[agentcore-runtime] History count: ${history.length}, workspacePath: ${options.workspacePath ?? 'none'}`
+    );
 
     // Use the chat session ID as runtimeSessionId so the same conversation
     // always routes to the same AgentCore microVM. This keeps Claude Code's
     // session data (~/.claude/projects/) alive between invocations.
     // Falls back to org_user if no chat session ID is available.
-    const rawSessionId = options.sessionId
-      ?? `${options.organizationId}_${options.userId}`;
-    const sessionId = rawSessionId.length >= 33
-      ? rawSessionId
-      : rawSessionId.padEnd(33, '_');
+    const rawSessionId = options.sessionId ?? `${options.organizationId}_${options.userId}`;
+    const sessionId = rawSessionId.length >= 33 ? rawSessionId : rawSessionId.padEnd(33, '_');
 
     console.log(`[agentcore-runtime] Invoking session=${sessionId} agent=${agentConfig.id}`);
     console.log(`[agentcore-runtime] runtimeArn=${this.runtimeArn}`);
@@ -170,24 +183,75 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
       payload,
       qualifier: 'DEFAULT',
     };
-    console.log(`[agentcore-runtime] command input:`, JSON.stringify({ ...commandInput, payload: '(omitted)' }));
+    console.log(
+      `[agentcore-runtime] command input:`,
+      JSON.stringify({ ...commandInput, payload: '(omitted)' })
+    );
 
     let response: any;
-    try {
-      response = await this.runtimeClient.send(new this.InvokeCommand(commandInput));
-      console.log(`[agentcore-runtime] response status=${response.$metadata?.httpStatusCode}`);
-    } catch (err: any) {
-      console.error(`[agentcore-runtime] INVOKE ERROR:`);
-      console.error(`[agentcore-runtime]   name=${err?.name}`);
-      console.error(`[agentcore-runtime]   message=${err?.message}`);
-      console.error(`[agentcore-runtime]   code=${err?.$metadata?.httpStatusCode}`);
-      console.error(`[agentcore-runtime]   requestId=${err?.$metadata?.requestId}`);
-      console.error(`[agentcore-runtime]   stack=${err?.stack?.split('\n').slice(0, 5).join('\n')}`);
+    // Retry logic for transient errors. We include:
+    //  - 502 Bad Gateway / 503 Service Unavailable / 504 Gateway Timeout:
+    //    typical cold-start / upstream issues in the container
+    //  - 424 Failed Dependency: AgentCore control plane surfaces container
+    //    502/503 as 424 ("the runtime dependency failed"); from our side
+    //    this has the same meaning and is worth retrying
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS_MS = [2000, 5000, 10000]; // exponential-ish backoff
+    const RETRYABLE_STATUS_CODES = new Set([424, 502, 503, 504]);
+
+    let lastErr: any = null;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        response = await this.runtimeClient.send(new this.InvokeCommand(commandInput));
+        console.log(
+          `[agentcore-runtime] response status=${response.$metadata?.httpStatusCode}${attempt > 0 ? ` (attempt ${attempt + 1})` : ''}`
+        );
+        lastErr = null;
+        break;
+      } catch (err: any) {
+        lastErr = err;
+        const statusCode = err?.$metadata?.httpStatusCode;
+        const isRetryable = RETRYABLE_STATUS_CODES.has(statusCode);
+
+        console.error(
+          `[agentcore-runtime] INVOKE ERROR (attempt ${attempt + 1}/${MAX_RETRIES + 1}):`
+        );
+        console.error(`[agentcore-runtime]   name=${err?.name}`);
+        console.error(`[agentcore-runtime]   message=${err?.message}`);
+        console.error(`[agentcore-runtime]   code=${statusCode}`);
+        console.error(`[agentcore-runtime]   requestId=${err?.$metadata?.requestId}`);
+        console.error(`[agentcore-runtime]   retryable=${isRetryable}`);
+
+        if (!isRetryable || attempt === MAX_RETRIES) {
+          // Either not retryable, or we've exhausted retries — fail.
+          console.error(
+            `[agentcore-runtime]   stack=${err?.stack?.split('\n').slice(0, 5).join('\n')}`
+          );
+          yield {
+            type: 'error',
+            code: 'AGENTCORE_INVOKE_ERROR',
+            message: `Failed to invoke AgentCore: ${err instanceof Error ? err.message : String(err)}`,
+            suggestedAction: isRetryable
+              ? 'The runtime may be cold-starting; please retry in a moment.'
+              : 'Check AGENTCORE_RUNTIME_ARN and IAM permissions',
+          };
+          return;
+        }
+
+        // Wait before next retry (cold-start backoff)
+        const delayMs = RETRY_DELAYS_MS[attempt] ?? 10_000;
+        console.log(`[agentcore-runtime] Retrying after ${delayMs}ms (cold start likely)...`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
+    if (!response) {
+      // Defensive: should not reach here, but handle it just in case.
       yield {
         type: 'error',
         code: 'AGENTCORE_INVOKE_ERROR',
-        message: `Failed to invoke AgentCore: ${err instanceof Error ? err.message : String(err)}`,
-        suggestedAction: 'Check AGENTCORE_RUNTIME_ARN and IAM permissions',
+        message: `Failed to invoke AgentCore after retries: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
+        suggestedAction: 'The runtime may be experiencing issues; try again later.',
       };
       return;
     }
@@ -200,31 +264,98 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
       try {
         yield this.mapEvent(JSON.parse(body));
       } catch {
-        yield { type: 'error', code: 'PARSE_ERROR', message: `Failed to parse response: ${body.slice(0, 200)}` };
+        yield {
+          type: 'error',
+          code: 'PARSE_ERROR',
+          message: `Failed to parse response: ${body.slice(0, 200)}`,
+        };
       }
     }
 
-    // --- S3 sync-back: fire-and-forget ---
+    // --- S3 sync-back + carry-forward: chained fire-and-forget ---
     // Local workspace is just a cache; container/S3 is the source of truth.
-    // No need to block the generator return (which delays [DONE]) for this.
-    if (options.workspacePath && chatSessionId) {
+    // syncBackFromS3 itself takes time (proportional to workspace size), by
+    // which point the container's Stop hook has usually finished uploading.
+    // So we chain carry-forward after syncBackFromS3 instead of using a fixed delay.
+    if (options.workspacePath && chatSessionId && scopeId && scopeId !== 'default') {
+      const syncS3Prefix = `${options.organizationId}/${scopeId}/${chatSessionId ?? 'ephemeral'}/`;
+      const carryOrgId = options.organizationId;
+      const carryScopeId = scopeId;
+      const carrySessionId = chatSessionId;
+      (async () => {
+        try {
+          const count = await this.syncBackFromS3(syncS3Prefix, options.workspacePath!);
+          if (count > 0) {
+            console.log(
+              `[agentcore-runtime] Synced back ${count} files from S3 to local workspace`
+            );
+          }
+        } catch (err) {
+          console.warn(
+            '[agentcore-runtime] S3 sync-back failed:',
+            err instanceof Error ? err.message : err
+          );
+        }
+
+        // Carry-forward: persist workspace config changes to scope DB
+        try {
+          const { carryForwardService } = await import('./carry-forward.service.js');
+          const result = await carryForwardService.syncFromSession(
+            carryOrgId,
+            carryScopeId,
+            carrySessionId
+          );
+          if (
+            result.skills.length > 0 ||
+            result.agents.length > 0 ||
+            result.claudeMdUpdated ||
+            result.settingsUpdated ||
+            result.hooksUpdated ||
+            result.systemPromptUpdated
+          ) {
+            console.log(
+              `[agentcore-runtime] Carry-forward complete: skills=${result.skills.join(',')}, agents=${result.agents.join(',')}, systemPrompt=${result.systemPromptUpdated}`
+            );
+          }
+        } catch (err) {
+          console.warn(
+            '[agentcore-runtime] Carry-forward failed:',
+            err instanceof Error ? err.message : err
+          );
+        }
+      })();
+    } else if (options.workspacePath && chatSessionId) {
+      // No scope — just do sync-back without carry-forward
       const syncS3Prefix = `${options.organizationId}/${scopeId}/${chatSessionId ?? 'ephemeral'}/`;
       this.syncBackFromS3(syncS3Prefix, options.workspacePath)
-        .then(count => {
+        .then((count) => {
           if (count > 0) {
-            console.log(`[agentcore-runtime] Synced back ${count} files from S3 to local workspace`);
+            console.log(
+              `[agentcore-runtime] Synced back ${count} files from S3 to local workspace`
+            );
           }
         })
-        .catch(err => {
-          console.warn('[agentcore-runtime] S3 sync-back failed:', err instanceof Error ? err.message : err);
+        .catch((err) => {
+          console.warn(
+            '[agentcore-runtime] S3 sync-back failed:',
+            err instanceof Error ? err.message : err
+          );
         });
     }
   }
 
-  async disconnectSession(_sessionId: string): Promise<void> { /* managed by AgentCore */ }
-  async disconnectAll(): Promise<number> { return 0; }
-  get activeSessionCount(): number { return 0; }
-  hasSession(_sessionId: string): boolean { return false; }
+  async disconnectSession(_sessionId: string): Promise<void> {
+    /* managed by AgentCore */
+  }
+  async disconnectAll(): Promise<number> {
+    return 0;
+  }
+  get activeSessionCount(): number {
+    return 0;
+  }
+  hasSession(_sessionId: string): boolean {
+    return false;
+  }
 
   // ---------------------------------------------------------------------------
   // Workspace upload (skip if unchanged)
@@ -238,7 +369,7 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
   private async uploadWorkspaceIfNeeded(
     sessionId: string,
     workspacePath: string,
-    s3Prefix: string,
+    s3Prefix: string
   ): Promise<void> {
     try {
       // Read manifest to get current configVersion
@@ -247,7 +378,7 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
         const { readFile: readFileAsync } = await import('fs/promises');
         const { join } = await import('path');
         const manifest = JSON.parse(
-          await readFileAsync(join(workspacePath, '.workspace-manifest.json'), 'utf-8'),
+          await readFileAsync(join(workspacePath, '.workspace-manifest.json'), 'utf-8')
         );
         configVersion = manifest.configVersion ?? -1;
       } catch {
@@ -256,13 +387,17 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
 
       const lastUploaded = this.uploadedConfigVersions.get(sessionId);
       if (lastUploaded !== undefined && lastUploaded >= configVersion && configVersion >= 0) {
-        console.log(`[agentcore-runtime] Skipping S3 upload for session ${sessionId} (configVersion ${configVersion} already uploaded)`);
+        console.log(
+          `[agentcore-runtime] Skipping S3 upload for session ${sessionId} (configVersion ${configVersion} already uploaded)`
+        );
         return;
       }
 
       const count = await this.uploadDirToS3(workspacePath, s3Prefix);
       this.uploadedConfigVersions.set(sessionId, configVersion);
-      console.log(`[agentcore-runtime] Uploaded ${count} files to s3://${this.workspaceBucket}/${s3Prefix}`);
+      console.log(
+        `[agentcore-runtime] Uploaded ${count} files to s3://${this.workspaceBucket}/${s3Prefix}`
+      );
     } catch (err) {
       console.warn('[agentcore-runtime] Failed to upload workspace to S3:', err);
     }
@@ -274,7 +409,7 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
 
   private async loadChatHistory(
     organizationId: string,
-    sessionId?: string,
+    sessionId?: string
   ): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
     if (!sessionId) return [];
     try {
@@ -291,13 +426,16 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
       // Drop the last user message (it's the current prompt being sent)
       let lastUserIdx = -1;
       for (let i = reversed.length - 1; i >= 0; i--) {
-        if (reversed[i]!.type === 'user') { lastUserIdx = i; break; }
+        if (reversed[i]!.type === 'user') {
+          lastUserIdx = i;
+          break;
+        }
       }
       if (lastUserIdx >= 0) {
         reversed.splice(lastUserIdx, 1);
       }
       return reversed.map((m: { type: string; content: string }) => ({
-        role: m.type === 'ai' ? 'assistant' as const : 'user' as const,
+        role: m.type === 'ai' ? ('assistant' as const) : ('user' as const),
         content: this.extractTextFromContent(m.content),
       }));
     } catch (err) {
@@ -329,11 +467,26 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
   private async uploadDirToS3(localDir: string, s3Prefix: string): Promise<number> {
     let count = 0;
     const SKIP = new Set([
-      'node_modules', '.git', '__pycache__',
-      '.venv', 'venv', 'env', '.env',
-      '.tox', '.mypy_cache', '.pytest_cache', '.ruff_cache',
-      '.next', '.nuxt', '.turbo', '.cache', '.parcel-cache',
-      'bower_components', '.gradle', 'target', '.cargo',
+      'node_modules',
+      '.git',
+      '__pycache__',
+      '.venv',
+      'venv',
+      'env',
+      '.env',
+      '.tox',
+      '.mypy_cache',
+      '.pytest_cache',
+      '.ruff_cache',
+      '.next',
+      '.nuxt',
+      '.turbo',
+      '.cache',
+      '.parcel-cache',
+      'bower_components',
+      '.gradle',
+      'target',
+      '.cargo',
       // Skip documents directory — RAG uses API calls, not local files.
       // Uploading thousands of document files would be slow and wasteful.
       'documents',
@@ -344,7 +497,11 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
 
     const walk = async (dir: string): Promise<void> => {
       let entries;
-      try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+      try {
+        entries = await readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
       for (const entry of entries) {
         if (SKIP.has(entry.name)) continue;
         const fullPath = join(dir, entry.name);
@@ -356,15 +513,27 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
             if (linkStat.isDirectory()) {
               await walk(fullPath);
             } else if (linkStat.isFile() && linkStat.size <= 100 * 1024 * 1024) {
-              filesToUpload.push({ fullPath, relPath: relative(localDir, fullPath), size: linkStat.size });
+              filesToUpload.push({
+                fullPath,
+                relPath: relative(localDir, fullPath),
+                size: linkStat.size,
+              });
             }
-          } catch { /* Broken symlink — skip */ }
+          } catch {
+            /* Broken symlink — skip */
+          }
         } else {
           try {
             const fileStat = statSync(fullPath);
             if (fileStat.size > 100 * 1024 * 1024) continue;
-            filesToUpload.push({ fullPath, relPath: relative(localDir, fullPath), size: fileStat.size });
-          } catch { /* skip */ }
+            filesToUpload.push({
+              fullPath,
+              relPath: relative(localDir, fullPath),
+              size: fileStat.size,
+            });
+          } catch {
+            /* skip */
+          }
         }
       }
     };
@@ -375,15 +544,19 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
     const CONCURRENCY = 10;
     for (let i = 0; i < filesToUpload.length; i += CONCURRENCY) {
       const batch = filesToUpload.slice(i, i + CONCURRENCY);
-      const results = await Promise.allSettled(batch.map(async (file) => {
-        const key = `${s3Prefix}${file.relPath}`;
-        await this.s3Client.send(new PutObjectCommand({
-          Bucket: this.workspaceBucket,
-          Key: key,
-          Body: createReadStream(file.fullPath),
-          ContentLength: file.size,
-        }));
-      }));
+      const results = await Promise.allSettled(
+        batch.map(async (file) => {
+          const key = `${s3Prefix}${file.relPath}`;
+          await this.s3Client.send(
+            new PutObjectCommand({
+              Bucket: this.workspaceBucket,
+              Key: key,
+              Body: createReadStream(file.fullPath),
+              ContentLength: file.size,
+            })
+          );
+        })
+      );
       for (const r of results) {
         if (r.status === 'fulfilled') count++;
         else console.warn(`[agentcore-runtime] Upload failed:`, r.reason);
@@ -407,11 +580,13 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
     let continuationToken: string | undefined;
 
     do {
-      const result = await this.s3Client.send(new ListObjectsV2Command({
-        Bucket: this.workspaceBucket,
-        Prefix: s3Prefix,
-        ContinuationToken: continuationToken,
-      }));
+      const result = await this.s3Client.send(
+        new ListObjectsV2Command({
+          Bucket: this.workspaceBucket,
+          Prefix: s3Prefix,
+          ContinuationToken: continuationToken,
+        })
+      );
 
       for (const obj of result.Contents ?? []) {
         if (!obj.Key) continue;
@@ -422,13 +597,28 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
         // guard against it on the download side too)
         const firstSegment = relativePath.split('/')[0];
         const SKIP_SEGMENTS = new Set([
-          'node_modules', '.git', '__pycache__',
-          '.venv', 'venv', 'env', '.env',
-          '.tox', '.mypy_cache', '.pytest_cache', '.ruff_cache',
-          '.next', '.nuxt', '.turbo', '.cache', '.parcel-cache',
-          'bower_components', '.gradle', 'target', '.cargo',
+          'node_modules',
+          '.git',
+          '__pycache__',
+          '.venv',
+          'venv',
+          'env',
+          '.env',
+          '.tox',
+          '.mypy_cache',
+          '.pytest_cache',
+          '.ruff_cache',
+          '.next',
+          '.nuxt',
+          '.turbo',
+          '.cache',
+          '.parcel-cache',
+          'bower_components',
+          '.gradle',
+          'target',
+          '.cargo',
         ]);
-        if (SKIP_SEGMENTS.has(firstSegment)) continue;
+        if (SKIP_SEGMENTS.has(firstSegment!)) continue;
 
         const localPath = join(localDir, relativePath);
         const localDirPath = dirname(localPath);
@@ -437,20 +627,27 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
           await mkdir(localDirPath, { recursive: true });
           // Skip if localPath is already a directory
           try {
-            const s = await import('fs/promises').then(m => m.stat(localPath));
+            const s = await import('fs/promises').then((m) => m.stat(localPath));
             if (s.isDirectory()) continue;
-          } catch { /* doesn't exist yet, fine */ }
-          const response = await this.s3Client.send(new GetObjectCommand({
-            Bucket: this.workspaceBucket,
-            Key: obj.Key,
-          }));
+          } catch {
+            /* doesn't exist yet, fine */
+          }
+          const response = await this.s3Client.send(
+            new GetObjectCommand({
+              Bucket: this.workspaceBucket,
+              Key: obj.Key,
+            })
+          );
           if (response.Body) {
             await pipeline(response.Body as NodeJS.ReadableStream, createWriteStream(localPath));
             downloaded++;
           }
         } catch (err) {
           // Non-critical — local workspace is a cache
-          console.warn(`[agentcore-runtime] syncBack failed for ${relativePath}:`, err instanceof Error ? err.message : err);
+          console.warn(
+            `[agentcore-runtime] syncBack failed for ${relativePath}:`,
+            err instanceof Error ? err.message : err
+          );
         }
       }
 
@@ -467,7 +664,9 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
     let buffer = '';
     const iterable = stream[Symbol.asyncIterator]
       ? stream
-      : stream.transformToByteArray ? [await stream.transformToByteArray()] : [stream];
+      : stream.transformToByteArray
+        ? [await stream.transformToByteArray()]
+        : [stream];
 
     for await (const chunk of iterable) {
       buffer += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf-8');
@@ -478,7 +677,11 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
           if (!line.startsWith('data: ')) continue;
           const data = line.slice(6).trim();
           if (!data || data === '[DONE]') continue;
-          try { yield this.mapEvent(JSON.parse(data)); } catch { /* skip */ }
+          try {
+            yield this.mapEvent(JSON.parse(data));
+          } catch {
+            /* skip */
+          }
         }
       }
     }
@@ -487,7 +690,11 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
         if (!line.startsWith('data: ')) continue;
         const data = line.slice(6).trim();
         if (!data || data === '[DONE]') continue;
-        try { yield this.mapEvent(JSON.parse(data)); } catch { /* skip */ }
+        try {
+          yield this.mapEvent(JSON.parse(data));
+        } catch {
+          /* skip */
+        }
       }
     }
   }
@@ -497,23 +704,45 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
       case 'session_start':
         return { type: 'session_start', sessionId: event.session_id };
       case 'assistant':
-        return { type: 'assistant', sessionId: event.session_id, content: (event.content ?? []) as ContentBlock[], model: event.model };
+        return {
+          type: 'assistant',
+          sessionId: event.session_id,
+          content: (event.content ?? []) as ContentBlock[],
+          model: event.model,
+        };
       case 'result': {
         // Map token_usage from AgentCore container format to backend format
         const tu = (event as any).token_usage;
-        const tokenUsage = tu ? {
-          inputTokens: tu.input_tokens ?? 0,
-          outputTokens: tu.output_tokens ?? 0,
-          cacheReadInputTokens: tu.cache_read_input_tokens ?? 0,
-          cacheCreationInputTokens: tu.cache_creation_input_tokens ?? 0,
-          totalCostUsd: tu.total_cost_usd ?? 0,
-        } : undefined;
-        return { type: 'result', sessionId: event.session_id, durationMs: event.duration_ms, numTurns: event.num_turns, tokenUsage };
+        const tokenUsage = tu
+          ? {
+              inputTokens: tu.input_tokens ?? 0,
+              outputTokens: tu.output_tokens ?? 0,
+              cacheReadInputTokens: tu.cache_read_input_tokens ?? 0,
+              cacheCreationInputTokens: tu.cache_creation_input_tokens ?? 0,
+              totalCostUsd: tu.total_cost_usd ?? 0,
+            }
+          : undefined;
+        return {
+          type: 'result',
+          sessionId: event.session_id,
+          durationMs: event.duration_ms,
+          numTurns: event.num_turns,
+          tokenUsage,
+        };
       }
       case 'error':
-        return { type: 'error', sessionId: event.session_id, code: event.code ?? 'AGENTCORE_ERROR', message: event.message ?? 'Unknown error' };
+        return {
+          type: 'error',
+          sessionId: event.session_id,
+          code: event.code ?? 'AGENTCORE_ERROR',
+          message: event.message ?? 'Unknown error',
+        };
       default:
-        return { type: 'error', code: 'UNKNOWN_EVENT', message: `Unknown event type: ${(event as any).type}` };
+        return {
+          type: 'error',
+          code: 'UNKNOWN_EVENT',
+          message: `Unknown event type: ${(event as any).type}`,
+        };
     }
   }
 

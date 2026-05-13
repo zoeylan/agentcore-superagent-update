@@ -218,6 +218,7 @@ CLAUDE_MODEL=claude-sonnet-4-6
 AGENT_WORKSPACE_BASE_DIR=/opt/super-agent/workspaces
 AGENT_RUNTIME=claude
 AGENTCORE_WORKSPACE_S3_BUCKET=$WORKSPACE_BUCKET
+RAG_ENABLED=true
 BASEEOF
 )
 
@@ -364,6 +365,16 @@ if [ "$SKIP_BACKEND" = false ]; then
     backend/ \
     "$SSH_USER@localhost:/opt/super-agent/backend/"
 
+  echo "=== Syncing industry-packs to EC2 ==="
+  if [ -d "$PROJECT_ROOT/industry-packs" ]; then
+    rsync -avz --delete \
+      -e "$RSYNC_SSH" \
+      "$PROJECT_ROOT/industry-packs/" \
+      "$SSH_USER@localhost:/opt/super-agent/industry-packs/"
+  else
+    echo "  (industry-packs/ not found locally, skipping)"
+  fi
+
   echo "=== Installing deps, migrating, restarting ==="
   $SSH_CMD << 'REMOTE_DEPLOY'
 set -euo pipefail
@@ -405,6 +416,9 @@ else
   psql "$PSQL_URL" -c "UPDATE profiles SET password_hash = '${ADMIN_HASH}' WHERE username = 'admin@example.com' AND password_hash IS NULL;" 2>/dev/null || true
   echo "  Admin login: admin@example.com / Admin1234!"
 fi
+
+echo "  Seeding showcase from industry packs (企业Agent大赏)..."
+npx tsx prisma/seed-showcase-from-packs.ts 2>/dev/null || echo "  (Showcase seed failed or not available)"
 
 echo "  Restarting backend..."
 sudo systemctl restart backend

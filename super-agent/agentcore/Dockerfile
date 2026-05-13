@@ -40,6 +40,12 @@ RUN chown -R node:node /workspace /home/node/.claude /app
 
 # Run as non-root
 USER node
+
+# Set HOME to /workspace so Claude Code writes ~/.claude/ inside the workspace
+# This ensures all file operations (rules, backups, session-env, etc.) stay
+# within /workspace and get synced to S3.
+ENV HOME=/workspace
+
 WORKDIR /workspace
 
 # AgentCore protocol requires port 8080

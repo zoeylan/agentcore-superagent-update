@@ -20,6 +20,8 @@ import {
   Zap, Users, Brain, CheckCircle2, Rocket,
 } from 'lucide-react'
 import { restClient } from '@/services/api/restClient'
+import { useToast } from '@/components'
+import { RestChatService } from '@/services/api/restChatService'
 
 // ============================================================================
 // Types
@@ -75,6 +77,7 @@ interface StarredSession {
 export function ShowcasePage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
+  const toast = useToast()
   const [industries, setIndustries] = useState<ShowcaseIndustry[]>([])
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -115,6 +118,7 @@ export function ShowcasePage() {
 
     setDeploying(c.id)
     let scopeId: string | undefined
+    let deployError: string | null = null
 
     try {
       const res = await restClient.post<{ data: { scopeId: string } }>('/api/packs/deploy', {
@@ -125,18 +129,33 @@ export function ShowcasePage() {
       setDeployedScopes(prev => new Set([...prev, `${packId}/${scopeDir}`]))
     } catch (err: any) {
       if (err?.response?.status === 409) {
+        // Already deployed — extract existing scopeId
         scopeId = err?.response?.data?.data?.scopeId
         setDeployedScopes(prev => new Set([...prev, `${packId}/${scopeDir}`]))
       } else {
         console.error('Deploy failed:', err)
+        deployError = err?.message || err?.response?.data?.error || '部署失败，请稍后重试'
       }
     }
 
     setDeploying(null)
 
-    // Always navigate to chat after deploy attempt
+    // If deploy failed and we have no scopeId, don't navigate — show error toast.
+    if (!scopeId) {
+      toast.error(deployError || '部署失败：未能获取业务场景 ID')
+      return
+    }
+
+    // Clear any stale chat state so we start fresh in the newly deployed scope.
+    // Without this, ChatProvider would fall back to getStoredScopeId() if URL params
+    // somehow get dropped, leaving user stuck on the previous scope.
+    localStorage.removeItem('super-agent-chat-backend-session')
+    localStorage.removeItem('super-agent-chat-scope')
+    RestChatService.resetSession()
+
+    // Navigate to chat with the deployed scope + initial prompt.
     const params = new URLSearchParams()
-    if (scopeId) params.set('scope', scopeId)
+    params.set('scope', scopeId)
     const prompt = c.initial_prompt || c.description
     if (prompt) params.set('prompt', prompt)
     params.set('t', Date.now().toString()) // force remount
