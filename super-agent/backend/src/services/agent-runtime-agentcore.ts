@@ -662,6 +662,7 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
 
   private async *parseSSEStream(stream: any): AsyncGenerator<ConversationEvent> {
     let buffer = '';
+    const seenBrowserSessions = new Set<string>();
     const iterable = stream[Symbol.asyncIterator]
       ? stream
       : stream.transformToByteArray
@@ -686,6 +687,11 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
             if (browserFrame) {
               yield browserFrame;
             }
+            // Check for browser session IDs to emit live view ready events
+            const liveViewEvent = await this.extractBrowserLiveView(parsed, seenBrowserSessions);
+            if (liveViewEvent) {
+              yield liveViewEvent;
+            }
           } catch {
             /* skip */
           }
@@ -704,6 +710,10 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
           const browserFrame = this.extractBrowserFrame(parsed);
           if (browserFrame) {
             yield browserFrame;
+          }
+          const liveViewEvent = await this.extractBrowserLiveView(parsed, seenBrowserSessions);
+          if (liveViewEvent) {
+            yield liveViewEvent;
           }
         } catch {
           /* skip */
@@ -788,6 +798,58 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
             browserToolName: lastBrowserToolName,
           };
         }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Detect browser session IDs in tool_use events and fetch the DCV live view URL.
+   * Only emits once per unique session_id to avoid redundant API calls.
+   */
+  private async extractBrowserLiveView(
+    event: AgentCoreEvent,
+    seenSessions: Set<string>
+  ): Promise<ConversationEvent | null> {
+    if (event.type !== 'assistant' || !event.content) return null;
+
+    for (const block of event.content) {
+      if (block.type !== 'tool_use' || !block.name) continue;
+
+      // Match browser tool names (bare or MCP-prefixed)
+      const bare = block.name.includes('__') ? block.name.split('__').pop()! : block.name;
+      if (!bare.startsWith('browser_')) continue;
+
+      // Extract session_id from tool input
+      const input = block.input as Record<string, unknown> | undefined;
+      const browserSessionId = input?.session_id as string | undefined;
+      if (!browserSessionId) continue;
+
+      // Only process each session_id once
+      if (seenSessions.has(browserSessionId)) continue;
+      seenSessions.add(browserSessionId);
+
+      // Fetch live view URL from AgentCore
+      try {
+        const { browserLiveViewService } = await import('./browser-live-view.service.js');
+        const result = await browserLiveViewService.getLiveViewUrl(browserSessionId);
+        console.log(
+          `[agentcore-runtime] Browser live view ready: session=${browserSessionId}, url=${result.liveViewUrl.slice(0, 80)}...`
+        );
+        return {
+          type: 'browser_live_view_ready',
+          sessionId: browserSessionId,
+          liveViewUrl: result.liveViewUrl,
+          browserIdentifier: result.browserIdentifier,
+        };
+      } catch (err) {
+        console.warn(
+          `[agentcore-runtime] Failed to get browser live view URL for session ${browserSessionId}:`,
+          err instanceof Error ? err.message : err
+        );
+        // Non-fatal — screenshots still work as fallback
+        return null;
       }
     }
 

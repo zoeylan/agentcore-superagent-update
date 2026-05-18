@@ -689,6 +689,12 @@ export class ChatService {
             data: JSON.stringify({ type: event.type, screenshotData: event.screenshotData, browserToolName: event.browserToolName }),
           }));
         } catch { /* client gone */ }
+      } else if (event.type === 'browser_live_view_ready') {
+        try {
+          reply.raw.write(formatSSEEvent({
+            data: JSON.stringify({ type: event.type, liveViewUrl: event.liveViewUrl, sessionId: event.sessionId, browserIdentifier: event.browserIdentifier }),
+          }));
+        } catch { /* client gone */ }
       }
     };
     if (registrySub) {
@@ -1144,6 +1150,11 @@ export class ChatService {
         case 'browser_frame':
           reply.raw.write(formatSSEEvent({
             data: JSON.stringify({ type: 'browser_frame', screenshotData: safe.screenshotData, browserToolName: safe.browserToolName }),
+          }));
+          break;
+        case 'browser_live_view_ready':
+          reply.raw.write(formatSSEEvent({
+            data: JSON.stringify({ type: 'browser_live_view_ready', liveViewUrl: safe.liveViewUrl, sessionId: safe.sessionId, browserIdentifier: safe.browserIdentifier }),
           }));
           break;
       }

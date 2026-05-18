@@ -186,7 +186,7 @@ export interface TokenUsage {
 }
 
 export interface ConversationEvent {
-  type: 'session_start' | 'assistant' | 'result' | 'heartbeat' | 'error' | 'preview_ready' | 'browser_frame';
+  type: 'session_start' | 'assistant' | 'result' | 'heartbeat' | 'error' | 'preview_ready' | 'browser_frame' | 'browser_live_view_ready';
   sessionId?: string;
   content?: ContentBlock[];
   model?: string;
@@ -207,6 +207,9 @@ export interface ConversationEvent {
   /** browser_frame fields — screenshot from browser MCP tool */
   screenshotData?: string;
   browserToolName?: string;
+  /** browser_live_view_ready fields — DCV live view stream URL */
+  liveViewUrl?: string;
+  browserIdentifier?: string;
 }
 
 export interface MCPServerRecord {

@@ -203,6 +203,12 @@ class SessionStreamManager {
             detail: { screenshotData: event.screenshotData, browserToolName: event.browserToolName },
           }))
         },
+        onBrowserLiveViewReady: (event) => {
+          // Dispatch a custom event so the BrowserLiveView component can connect via DCV
+          window.dispatchEvent(new CustomEvent('browser-live-view-ready', {
+            detail: { liveViewUrl: event.liveViewUrl, sessionId: event.sessionId, browserIdentifier: event.browserIdentifier },
+          }))
+        },
         onDone: () => {
           const s = this.sessions.get(sessionId)
           if (s) {
@@ -338,6 +344,10 @@ class SessionStreamManager {
                   } else if (parsed.type === 'browser_frame' && parsed.screenshotData) {
                     window.dispatchEvent(new CustomEvent('browser-frame', {
                       detail: { screenshotData: parsed.screenshotData, browserToolName: parsed.browserToolName },
+                    }))
+                  } else if (parsed.type === 'browser_live_view_ready' && parsed.liveViewUrl) {
+                    window.dispatchEvent(new CustomEvent('browser-live-view-ready', {
+                      detail: { liveViewUrl: parsed.liveViewUrl, sessionId: parsed.sessionId, browserIdentifier: parsed.browserIdentifier },
                     }))
                   }
                 } catch { /* ignore non-JSON */ }
