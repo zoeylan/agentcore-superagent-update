@@ -197,6 +197,12 @@ class SessionStreamManager {
             detail: { url: event.url, name: event.name || 'Preview', appId: event.app_id },
           }))
         },
+        onBrowserFrame: (event) => {
+          // Dispatch a custom event so the BrowserLiveView component can display the screenshot
+          window.dispatchEvent(new CustomEvent('browser-frame', {
+            detail: { screenshotData: event.screenshotData, browserToolName: event.browserToolName },
+          }))
+        },
         onDone: () => {
           const s = this.sessions.get(sessionId)
           if (s) {
@@ -328,6 +334,10 @@ class SessionStreamManager {
                   } else if (parsed.type === 'preview_ready' && parsed.url) {
                     window.dispatchEvent(new CustomEvent('preview-ready', {
                       detail: { url: parsed.url, name: parsed.appName || 'Preview', appId: parsed.appId },
+                    }))
+                  } else if (parsed.type === 'browser_frame' && parsed.screenshotData) {
+                    window.dispatchEvent(new CustomEvent('browser-frame', {
+                      detail: { screenshotData: parsed.screenshotData, browserToolName: parsed.browserToolName },
                     }))
                   }
                 } catch { /* ignore non-JSON */ }

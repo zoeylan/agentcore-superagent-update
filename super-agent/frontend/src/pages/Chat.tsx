@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useContext, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Send, ChevronDown, AlertCircle, X, Bot, Layers, MessageSquare, File as FileIcon, Save, Eye, Pencil, Square, Paperclip, Upload, Trash2, Globe, Rocket, RefreshCw, ExternalLink, Brain, Download, Users, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { BrowserLiveView } from '@/components/chat/BrowserLiveView'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import hljs from 'highlight.js'
@@ -2339,6 +2340,9 @@ function ChatInterfaceContent() {
           </div>
         )
       )}
+
+      {/* Browser Live View — floating panel for browser tool screenshots */}
+      <BrowserLiveView />
 
       {/* Save to Memory modal */}
       {showSaveMemory && backendSessionId && selectedBusinessScopeId && (

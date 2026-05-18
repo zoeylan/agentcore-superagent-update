@@ -98,6 +98,12 @@ export interface PreviewReadyEvent {
   name?: string;
 }
 
+export interface BrowserFrameEvent {
+  type: 'browser_frame';
+  screenshotData: string;
+  browserToolName?: string;
+}
+
 export type ChatStreamEvent =
   | SessionStartEvent
   | AssistantEvent
@@ -105,7 +111,8 @@ export type ChatStreamEvent =
   | HeartbeatEvent
   | ErrorEvent
   | DoneEvent
-  | PreviewReadyEvent;
+  | PreviewReadyEvent
+  | BrowserFrameEvent;
 
 /**
  * Callbacks for consuming chat stream events.
@@ -117,6 +124,7 @@ export interface ChatStreamCallbacks {
   onHeartbeat?: (event: HeartbeatEvent) => void;
   onError?: (event: ErrorEvent) => void;
   onPreviewReady?: (event: PreviewReadyEvent) => void;
+  onBrowserFrame?: (event: BrowserFrameEvent) => void;
   onDone?: () => void;
 }
 
@@ -296,6 +304,13 @@ export function parseSSEData(data: string, eventName?: string): ChatStreamEvent 
             url: parsed.url ?? '',
             name: parsed.appName ?? parsed.name,
           } satisfies PreviewReadyEvent;
+
+        case 'browser_frame':
+          return {
+            type: 'browser_frame',
+            screenshotData: parsed.screenshotData ?? '',
+            browserToolName: parsed.browserToolName,
+          } satisfies BrowserFrameEvent;
 
         default:
           // Unknown type — return null
@@ -484,6 +499,10 @@ export function streamChat(
                 callbacks.onPreviewReady?.(event);
                 break;
 
+              case 'browser_frame':
+                callbacks.onBrowserFrame?.(event);
+                break;
+
               case 'done':
                 callbacks.onDone?.();
                 break;
@@ -523,6 +542,9 @@ export function streamChat(
               break;
             case 'preview_ready':
               callbacks.onPreviewReady?.(event);
+              break;
+            case 'browser_frame':
+              callbacks.onBrowserFrame?.(event);
               break;
             case 'done':
               callbacks.onDone?.();

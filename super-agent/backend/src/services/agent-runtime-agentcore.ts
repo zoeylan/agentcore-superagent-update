@@ -678,7 +678,14 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
           const data = line.slice(6).trim();
           if (!data || data === '[DONE]') continue;
           try {
-            yield this.mapEvent(JSON.parse(data));
+            const parsed = JSON.parse(data);
+            const event = this.mapEvent(parsed);
+            yield event;
+            // Check for browser tool screenshots in assistant events
+            const browserFrame = this.extractBrowserFrame(parsed);
+            if (browserFrame) {
+              yield browserFrame;
+            }
           } catch {
             /* skip */
           }
@@ -691,12 +698,104 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
         const data = line.slice(6).trim();
         if (!data || data === '[DONE]') continue;
         try {
-          yield this.mapEvent(JSON.parse(data));
+          const parsed = JSON.parse(data);
+          const event = this.mapEvent(parsed);
+          yield event;
+          const browserFrame = this.extractBrowserFrame(parsed);
+          if (browserFrame) {
+            yield browserFrame;
+          }
         } catch {
           /* skip */
         }
       }
     }
+  }
+
+  /**
+   * Detect browser tool screenshots in assistant events.
+   * Browser MCP tools (e.g. browser_snapshot, browser_screenshot, browser_navigate)
+   * return base64-encoded screenshots in tool_result content blocks.
+   */
+  private extractBrowserFrame(event: AgentCoreEvent): ConversationEvent | null {
+    if (event.type !== 'assistant' || !event.content) return null;
+
+    // Browser-related tool names from the agentcore-tools MCP browser server
+    const BROWSER_TOOL_NAMES = new Set([
+      'browser_screenshot', 'browser_snapshot', 'browser_navigate',
+      'browser_click', 'browser_type', 'browser_scroll',
+      'browser_tab_new', 'browser_tab_select', 'browser_tab_close',
+      'browser_wait', 'browser_javascript', 'browser_go_back',
+      'browser_go_forward', 'browser_reload', 'browser_close',
+      'browser_resize', 'browser_hover', 'browser_drag',
+      'browser_select_option', 'browser_press_key',
+    ]);
+
+    // Track the last browser tool_use name we see
+    let lastBrowserToolName: string | undefined;
+
+    for (const block of event.content) {
+      // Track tool_use blocks to correlate with tool_result
+      if (block.type === 'tool_use' && block.name && BROWSER_TOOL_NAMES.has(block.name)) {
+        lastBrowserToolName = block.name;
+      }
+
+      // Look for tool_result blocks that contain base64 image data
+      if (block.type === 'tool_result' && block.content) {
+        const content = typeof block.content === 'string' ? block.content : '';
+        // Browser MCP tools typically return screenshots as base64 data URIs or raw base64
+        // Check for common patterns:
+        // 1. data:image/png;base64,... or data:image/jpeg;base64,...
+        // 2. JSON with an image field containing base64
+        // 3. Raw base64 that starts with PNG or JPEG magic bytes in base64
+
+        let screenshotData: string | null = null;
+
+        // Pattern 1: data URI directly in content
+        const dataUriMatch = content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
+        if (dataUriMatch) {
+          screenshotData = dataUriMatch[0];
+        }
+
+        // Pattern 2: JSON content with screenshot/image field
+        if (!screenshotData) {
+          try {
+            const parsed = JSON.parse(content);
+            const imgField = parsed.screenshot || parsed.image || parsed.base64_image || parsed.data;
+            if (typeof imgField === 'string' && imgField.length > 100) {
+              // If it looks like base64 (PNG magic: iVBOR or JPEG magic: /9j/)
+              if (imgField.startsWith('data:image/')) {
+                screenshotData = imgField;
+              } else if (imgField.startsWith('iVBOR') || imgField.startsWith('/9j/')) {
+                screenshotData = `data:image/png;base64,${imgField}`;
+              }
+            }
+          } catch {
+            // Not JSON — check raw base64
+          }
+        }
+
+        // Pattern 3: Raw base64 PNG/JPEG in content (long base64 strings starting with known magic)
+        if (!screenshotData && content.length > 200) {
+          if (content.startsWith('iVBOR')) {
+            screenshotData = `data:image/png;base64,${content}`;
+          } else if (content.startsWith('/9j/')) {
+            screenshotData = `data:image/jpeg;base64,${content}`;
+          }
+        }
+
+        if (screenshotData) {
+          return {
+            type: 'browser_frame',
+            sessionId: event.session_id,
+            screenshotData,
+            browserToolName: lastBrowserToolName,
+          };
+        }
+      }
+    }
+
+    return null;
   }
 
   private mapEvent(event: AgentCoreEvent): ConversationEvent {

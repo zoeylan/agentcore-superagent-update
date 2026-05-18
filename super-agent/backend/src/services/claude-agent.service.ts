@@ -186,7 +186,7 @@ export interface TokenUsage {
 }
 
 export interface ConversationEvent {
-  type: 'session_start' | 'assistant' | 'result' | 'heartbeat' | 'error' | 'preview_ready';
+  type: 'session_start' | 'assistant' | 'result' | 'heartbeat' | 'error' | 'preview_ready' | 'browser_frame';
   sessionId?: string;
   content?: ContentBlock[];
   model?: string;
@@ -204,6 +204,9 @@ export interface ConversationEvent {
   speakerAgentAvatar?: string | null;
   /** Token usage from the LLM — populated on result events */
   tokenUsage?: TokenUsage;
+  /** browser_frame fields — screenshot from browser MCP tool */
+  screenshotData?: string;
+  browserToolName?: string;
 }
 
 export interface MCPServerRecord {

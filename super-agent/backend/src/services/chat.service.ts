@@ -683,6 +683,12 @@ export class ChatService {
             data: JSON.stringify({ type: event.type, appId: event.appId, url: event.url, appName: event.appName }),
           }));
         } catch { /* client gone */ }
+      } else if (event.type === 'browser_frame') {
+        try {
+          reply.raw.write(formatSSEEvent({
+            data: JSON.stringify({ type: event.type, screenshotData: event.screenshotData, browserToolName: event.browserToolName }),
+          }));
+        } catch { /* client gone */ }
       }
     };
     if (registrySub) {
@@ -1133,6 +1139,11 @@ export class ChatService {
         case 'error':
           reply.raw.write(formatSSEEvent({
             data: JSON.stringify({ type: 'error', code: safe.code, message: safe.message, suggested_action: safe.suggestedAction }),
+          }));
+          break;
+        case 'browser_frame':
+          reply.raw.write(formatSSEEvent({
+            data: JSON.stringify({ type: 'browser_frame', screenshotData: safe.screenshotData, browserToolName: safe.browserToolName }),
           }));
           break;
       }
