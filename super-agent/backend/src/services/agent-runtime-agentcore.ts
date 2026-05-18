@@ -720,23 +720,19 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
   private extractBrowserFrame(event: AgentCoreEvent): ConversationEvent | null {
     if (event.type !== 'assistant' || !event.content) return null;
 
-    // Browser-related tool names from the agentcore-tools MCP browser server
-    const BROWSER_TOOL_NAMES = new Set([
-      'browser_screenshot', 'browser_snapshot', 'browser_navigate',
-      'browser_click', 'browser_type', 'browser_scroll',
-      'browser_tab_new', 'browser_tab_select', 'browser_tab_close',
-      'browser_wait', 'browser_javascript', 'browser_go_back',
-      'browser_go_forward', 'browser_reload', 'browser_close',
-      'browser_resize', 'browser_hover', 'browser_drag',
-      'browser_select_option', 'browser_press_key',
-    ]);
+    // Match browser tool names — supports both bare names and MCP-prefixed names
+    // e.g. "browser_navigate" or "mcp__agentcore-tools__browser_navigate"
+    function isBrowserTool(name: string): boolean {
+      const bare = name.includes('__') ? name.split('__').pop()! : name;
+      return bare.startsWith('browser_');
+    }
 
     // Track the last browser tool_use name we see
     let lastBrowserToolName: string | undefined;
 
     for (const block of event.content) {
       // Track tool_use blocks to correlate with tool_result
-      if (block.type === 'tool_use' && block.name && BROWSER_TOOL_NAMES.has(block.name)) {
+      if (block.type === 'tool_use' && block.name && isBrowserTool(block.name)) {
         lastBrowserToolName = block.name;
       }
 
