@@ -23,7 +23,7 @@ const envSchema = z.object({
   AUTH_MODE: z.enum(['cognito', 'local']).default('local'),
   COGNITO_USER_POOL_ID: z.string().optional().default(''),
   COGNITO_CLIENT_ID: z.string().optional().default(''),
-  COGNITO_REGION: z.string().default('us-east-1'),
+  COGNITO_REGION: z.string().default('ap-northeast-1'),
   COGNITO_DOMAIN: z.string().optional(),
 
   // JWT secret for local auth mode
@@ -42,7 +42,7 @@ const envSchema = z.object({
   COGNITO_ADMIN_SUB: z.string().optional(),
 
   // AWS
-  AWS_REGION: z.string().default('us-east-1'),
+  AWS_REGION: z.string().default('ap-northeast-1'),
   AWS_ACCESS_KEY_ID: z.string().optional(),
   AWS_SECRET_ACCESS_KEY: z.string().optional(),
 

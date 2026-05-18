@@ -15,7 +15,7 @@
     ]
   },
   "config_fields": [
-    { "key": "region", "label": { "en": "AWS Region", "cn": "AWS Region" }, "type": "text", "placeholder": "us-east-1", "required": true },
+    { "key": "region", "label": { "en": "AWS Region", "cn": "AWS Region" }, "type": "text", "placeholder": "ap-northeast-1", "required": true },
     { "key": "endpoint_name", "label": { "en": "Endpoint Name", "cn": "Endpoint Name" }, "type": "text", "placeholder": "my-model-endpoint", "required": false }
   ],
   "setup_guide": "setup-guide.md",

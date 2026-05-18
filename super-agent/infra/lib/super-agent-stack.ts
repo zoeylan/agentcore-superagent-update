@@ -42,8 +42,9 @@ export class SuperAgentStack extends cdk.Stack {
     const hostedZoneId = this.node.tryGetContext('hostedZoneId') as string | undefined;
     const authMode = (this.node.tryGetContext('authMode') as string) || 'local';
 
-    if (enableCdn && (!domainName || !hostedZoneId)) {
-      throw new Error('enableCdn=true requires domainName and hostedZoneId context values');
+    const hasCustomDomain = !!(domainName && hostedZoneId);
+    if (enableCdn && domainName && !hostedZoneId) {
+      throw new Error('domainName requires hostedZoneId context value');
     }
 
     // =========================================================================
@@ -201,7 +202,6 @@ export class SuperAgentStack extends cdk.Stack {
 
     // Skills bucket (for agent skill definitions)
     const skillsBucket = new s3.Bucket(this, 'SkillsBucket', {
-      bucketName: `${bucketPrefix}-skills-${this.account}`,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -210,7 +210,6 @@ export class SuperAgentStack extends cdk.Stack {
 
     // Workspace bucket (for AgentCore S3 sync)
     const workspaceBucket = new s3.Bucket(this, 'WorkspaceBucket', {
-      bucketName: `${bucketPrefix}-workspace-${this.account}`,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -299,18 +298,6 @@ export class SuperAgentStack extends cdk.Stack {
       });
       frontendBucket.grantReadWrite(role); // for deploy script S3 sync
 
-      // ACM certificate (must be us-east-1 for CloudFront)
-      const hostedZone = route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
-        hostedZoneId: hostedZoneId!,
-        zoneName: domainName!.split('.').slice(1).join('.'), // extract parent domain
-      });
-
-      const certificate = new acm.DnsValidatedCertificate(this, 'Certificate', {
-        domainName: domainName!,
-        hostedZone,
-        region: 'us-east-1', // CloudFront requires us-east-1
-      });
-
       // OAC for S3
       const oac = new cloudfront.CfnOriginAccessControl(this, 'OAC', {
         originAccessControlConfig: {
@@ -321,6 +308,23 @@ export class SuperAgentStack extends cdk.Stack {
         },
       });
 
+      // ACM certificate + Route53 only when a custom domain is provided
+      let certificate: acm.ICertificate | undefined;
+      let hostedZone: route53.IHostedZone | undefined;
+
+      if (hasCustomDomain) {
+        hostedZone = route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
+          hostedZoneId: hostedZoneId!,
+          zoneName: domainName!.split('.').slice(1).join('.'),
+        });
+
+        certificate = new acm.DnsValidatedCertificate(this, 'Certificate', {
+          domainName: domainName!,
+          hostedZone,
+          region: 'us-east-1', // CloudFront requires us-east-1
+        });
+      }
+
       // CloudFront distribution
       distribution = new cloudfront.Distribution(this, 'CDN', {
         defaultBehavior: {
@@ -328,8 +332,7 @@ export class SuperAgentStack extends cdk.Stack {
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
         },
-        domainNames: [domainName!],
-        certificate,
+        ...(hasCustomDomain ? { domainNames: [domainName!], certificate } : {}),
         defaultRootObject: 'index.html',
         errorResponses: [
           { httpStatus: 403, responseHttpStatus: 200, responsePagePath: '/index.html', ttl: cdk.Duration.seconds(0) },
@@ -338,10 +341,10 @@ export class SuperAgentStack extends cdk.Stack {
       });
 
       // Add API/WS behaviors → EC2 origin (port 80, Nginx proxies to backend)
-      // Note: The origin domain is a placeholder; after CDK deploy, the EIP
-      // is known and CloudFront origin must be updated via console or CLI
-      // to point to the actual EC2 public IP.
-      const ec2Origin = new origins.HttpOrigin(`ec2-placeholder.${domainName}`, {
+      const ec2OriginDomain = hasCustomDomain
+        ? `ec2-placeholder.${domainName}`
+        : `ec2-placeholder.${id}.internal`;
+      const ec2Origin = new origins.HttpOrigin(ec2OriginDomain, {
         protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
         httpPort: 80,
       });
@@ -362,12 +365,14 @@ export class SuperAgentStack extends cdk.Stack {
         allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
       });
 
-      // Route53 ALIAS → CloudFront
-      new route53.ARecord(this, 'DnsAlias', {
-        zone: hostedZone,
-        recordName: domainName!,
-        target: route53.RecordTarget.fromAlias(new route53targets.CloudFrontTarget(distribution)),
-      });
+      // Route53 ALIAS → CloudFront (only with custom domain)
+      if (hasCustomDomain && hostedZone) {
+        new route53.ARecord(this, 'DnsAlias', {
+          zone: hostedZone,
+          recordName: domainName!,
+          target: route53.RecordTarget.fromAlias(new route53targets.CloudFrontTarget(distribution)),
+        });
+      }
     }
 
     // =========================================================================

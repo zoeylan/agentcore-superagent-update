@@ -29,7 +29,7 @@ export async function avatarRoutes(fastify: FastifyInstance) {
     const filename = `avatars/${Date.now()}-${Math.random().toString(36).substring(2)}.webp`;
 
     const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
-    const s3 = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
+    const s3 = new S3Client({ region: process.env.AWS_REGION || 'ap-northeast-1' });
     const bucket = process.env.S3_AVATARS_BUCKET || process.env.S3_BUCKET_NAME || 'super-agent-avatars';
 
     await s3.send(new PutObjectCommand({

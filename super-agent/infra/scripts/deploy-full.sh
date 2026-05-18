@@ -103,8 +103,8 @@ if [ "$SKIP_CDK" = false ]; then
     CDK_ARGS="$CDK_ARGS -c domainName=$DOMAIN_NAME -c hostedZoneId=$HOSTED_ZONE_ID"
   fi
 
-  echo "  Running: npx cdk deploy $CDK_ARGS $CDK_PARAMS --region $REGION --require-approval never"
-  npx cdk deploy $CDK_ARGS $CDK_PARAMS --region "$REGION" --require-approval never
+  echo "  Running: CDK_DEFAULT_REGION=$REGION CDK_DEFAULT_ACCOUNT=$ACCOUNT_ID npx cdk deploy $CDK_ARGS $CDK_PARAMS --region $REGION --require-approval never"
+  CDK_DEFAULT_REGION="$REGION" CDK_DEFAULT_ACCOUNT="$ACCOUNT_ID" npx cdk deploy $CDK_ARGS $CDK_PARAMS --region "$REGION" --require-approval never
 
   echo "  Waiting for EC2 SSM agent..."
   INSTANCE_ID=$(aws cloudformation describe-stacks \
@@ -150,26 +150,24 @@ fi
 # =========================================================================
 # Fix CloudFront EC2 origin (replace placeholder with actual EC2 public DNS)
 # =========================================================================
-if [ -n "$DOMAIN_NAME" ]; then
-  CF_DIST_ID=$(aws cloudformation describe-stacks \
+CF_DIST_ID=$(aws cloudformation describe-stacks \
+  --stack-name "$STACK_NAME" --region "$REGION" \
+  --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" --output text 2>/dev/null || echo "")
+if [ -n "$CF_DIST_ID" ] && [ "$CF_DIST_ID" != "None" ]; then
+  INSTANCE_ID_FOR_DNS=$(aws cloudformation describe-stacks \
     --stack-name "$STACK_NAME" --region "$REGION" \
-    --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" --output text 2>/dev/null || echo "")
-  if [ -n "$CF_DIST_ID" ] && [ "$CF_DIST_ID" != "None" ]; then
-    INSTANCE_ID_FOR_DNS=$(aws cloudformation describe-stacks \
-      --stack-name "$STACK_NAME" --region "$REGION" \
-      --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue" --output text)
-    EC2_PUBLIC_DNS=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID_FOR_DNS" --region "$REGION" \
-      --query "Reservations[0].Instances[0].PublicDnsName" --output text 2>/dev/null || echo "")
-    if [ -n "$EC2_PUBLIC_DNS" ] && [ "$EC2_PUBLIC_DNS" != "None" ]; then
-      # Check if origin still has placeholder
-      CURRENT_ORIGINS=$(aws cloudfront get-distribution-config --id "$CF_DIST_ID" \
-        --query "DistributionConfig.Origins.Items[*].DomainName" --output text 2>/dev/null || echo "")
-      if echo "$CURRENT_ORIGINS" | grep -q "ec2-placeholder"; then
-        echo ""
-        echo "=== Updating CloudFront EC2 origin → $EC2_PUBLIC_DNS ==="
-        CF_ETAG=$(aws cloudfront get-distribution-config --id "$CF_DIST_ID" --query "ETag" --output text)
-        aws cloudfront get-distribution-config --id "$CF_DIST_ID" --output json | \
-          python3 -c "
+    --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue" --output text)
+  EC2_PUBLIC_DNS=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID_FOR_DNS" --region "$REGION" \
+    --query "Reservations[0].Instances[0].PublicDnsName" --output text 2>/dev/null || echo "")
+  if [ -n "$EC2_PUBLIC_DNS" ] && [ "$EC2_PUBLIC_DNS" != "None" ]; then
+    CURRENT_ORIGINS=$(aws cloudfront get-distribution-config --id "$CF_DIST_ID" \
+      --query "DistributionConfig.Origins.Items[*].DomainName" --output text 2>/dev/null || echo "")
+    if echo "$CURRENT_ORIGINS" | grep -q "ec2-placeholder"; then
+      echo ""
+      echo "=== Updating CloudFront EC2 origin → $EC2_PUBLIC_DNS ==="
+      CF_ETAG=$(aws cloudfront get-distribution-config --id "$CF_DIST_ID" --query "ETag" --output text)
+      aws cloudfront get-distribution-config --id "$CF_DIST_ID" --output json | \
+        python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 config = data['DistributionConfig']
@@ -178,12 +176,11 @@ for origin in config['Origins']['Items']:
         origin['DomainName'] = '$EC2_PUBLIC_DNS'
 json.dump(config, open('/tmp/cf-origin-fix.json', 'w'))
 "
-        aws cloudfront update-distribution --id "$CF_DIST_ID" --if-match "$CF_ETAG" \
-          --distribution-config file:///tmp/cf-origin-fix.json \
-          --query "Distribution.Status" --output text 2>/dev/null || true
-        rm -f /tmp/cf-origin-fix.json
-        echo "  CloudFront origin updated."
-      fi
+      aws cloudfront update-distribution --id "$CF_DIST_ID" --if-match "$CF_ETAG" \
+        --distribution-config file:///tmp/cf-origin-fix.json \
+        --query "Distribution.Status" --output text 2>/dev/null || true
+      rm -f /tmp/cf-origin-fix.json
+      echo "  CloudFront origin updated."
     fi
   fi
 fi
@@ -331,7 +328,7 @@ if [ "$SKIP_AGENTCORE" = false ]; then
   ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/$ROLE_NAME"
 
   # Build environment variables JSON
-  ENV_VARS="{\"CLAUDE_CODE_USE_BEDROCK\":\"1\",\"ANTHROPIC_MODEL\":\"us.anthropic.claude-opus-4-6-v1\",\"AWS_REGION\":\"$REGION\",\"WORKSPACE_S3_REGION\":\"$REGION\""
+  ENV_VARS="{\"CLAUDE_CODE_USE_BEDROCK\":\"1\",\"ANTHROPIC_MODEL\":\"global.anthropic.claude-sonnet-4-6\",\"AWS_REGION\":\"$REGION\",\"WORKSPACE_S3_REGION\":\"$REGION\""
   if [ -n "$BEDROCK_AK" ] && [ -n "$BEDROCK_SK" ]; then
     ENV_VARS="$ENV_VARS,\"AWS_ACCESS_KEY_ID\":\"$BEDROCK_AK\",\"AWS_SECRET_ACCESS_KEY\":\"$BEDROCK_SK\""
   fi
@@ -427,8 +424,12 @@ PUBLIC_IP=$(aws cloudformation describe-stacks \
   --query "Stacks[0].Outputs[?OutputKey=='PublicIP'].OutputValue" --output text 2>/dev/null || echo "")
 if [ -n "$DOMAIN_NAME" ]; then
   echo "  App URL:    https://$DOMAIN_NAME"
+elif [ -n "$CF_DIST_ID" ] && [ "$CF_DIST_ID" != "None" ]; then
+  CF_DOMAIN=$(aws cloudfront get-distribution --id "$CF_DIST_ID" \
+    --query "Distribution.DomainName" --output text 2>/dev/null || echo "")
+  echo "  App URL:    https://$CF_DOMAIN"
 else
-  echo "  App URL:    https://$PUBLIC_IP"
+  echo "  App URL:    http://$PUBLIC_IP"
 fi
 echo "  Instance:   $INSTANCE_ID"
 [ "$SKIP_AGENTCORE" = false ] && echo "  AgentCore:  $RUNTIME_ARN"

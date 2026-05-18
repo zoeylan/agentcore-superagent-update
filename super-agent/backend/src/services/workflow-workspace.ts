@@ -128,7 +128,7 @@ export async function provisionWorkflowWorkspace(
 // Workspace Snapshot — S3 backup/restore for checkpoint pause/resume
 // ---------------------------------------------------------------------------
 
-const S3_REGION = process.env.WORKSPACE_S3_REGION ?? 'us-east-1';
+const S3_REGION = process.env.WORKSPACE_S3_REGION ?? 'ap-northeast-1';
 const WORKSPACE_S3_BUCKET = process.env.WORKSPACE_S3_BUCKET ?? config?.agentcore?.workspaceS3Bucket ?? '';
 
 const s3 = new S3Client({ region: S3_REGION });

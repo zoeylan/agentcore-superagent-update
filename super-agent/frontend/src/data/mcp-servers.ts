@@ -36,7 +36,7 @@ function awsScopeConfig(pkg: string, extraEnv?: Record<string, string>): Record<
       [pkg]: {
         command: 'uvx',
         args: [`${pkg}@latest`],
-        env: { FASTMCP_LOG_LEVEL: 'ERROR', AWS_REGION: 'us-east-1', AWS_PROFILE: '', ...extraEnv },
+        env: { FASTMCP_LOG_LEVEL: 'ERROR', AWS_REGION: 'ap-northeast-1', AWS_PROFILE: '', ...extraEnv },
         disabled: false,
         autoApprove: [],
       },

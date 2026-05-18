@@ -28,7 +28,7 @@ export class AvatarService {
   /** Lazy init — ensures process.env is populated (dotenv / systemd EnvironmentFile). */
   private ensureInit(): void {
     if (this.initialized) return;
-    const region = process.env.AWS_REGION || "us-west-2";
+    const region = process.env.AWS_REGION || "ap-northeast-1";
     this.bucketName = process.env.S3_AVATARS_BUCKET || process.env.S3_BUCKET_NAME || "super-agent-avatars";
     
     console.log('AvatarService initialized:', {
@@ -37,8 +37,7 @@ export class AvatarService {
       hasAwsCredentials: !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY)
     });
     
-    // Nova Canvas is only available in us-east-1
-    this.bedrockClient = new BedrockRuntimeClient({ region: "us-east-1" });
+    this.bedrockClient = new BedrockRuntimeClient({ region: "ap-northeast-1" });
     this.s3Client = new S3Client({ region });
     this.initialized = true;
   }

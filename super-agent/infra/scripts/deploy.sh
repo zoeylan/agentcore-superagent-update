@@ -192,9 +192,14 @@ echo "=== Generating and merging .env ==="
 if [ -n "$DOMAIN_NAME" ]; then
   APP_URL="https://$DOMAIN_NAME"
   CORS_VALUE="https://$DOMAIN_NAME"
+elif [ -n "$CF_DIST_ID" ] && [ "$CF_DIST_ID" != "None" ]; then
+  CF_DOMAIN=$(aws cloudfront get-distribution --id "$CF_DIST_ID" \
+    --query "Distribution.DomainName" --output text 2>/dev/null || echo "")
+  APP_URL="https://$CF_DOMAIN"
+  CORS_VALUE="https://$CF_DOMAIN"
 else
-  APP_URL="https://$PUBLIC_IP"
-  CORS_VALUE="https://$PUBLIC_IP"
+  APP_URL="http://$PUBLIC_IP"
+  CORS_VALUE="http://$PUBLIC_IP"
 fi
 
 # Build base .env content

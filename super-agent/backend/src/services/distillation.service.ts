@@ -24,7 +24,7 @@ import { scopeMemoryRepository } from '../repositories/scope-memory.repository.j
 import { redisService } from './redis.service.js';
 import type { ContentBlock } from './claude-agent.service.js';
 
-const DISTILLATION_MODEL_ID = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+const DISTILLATION_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0';
 const QUEUE_NAME = 'distillation';
 const CURSOR_PREFIX = 'distill:cursor:'; // Redis key: distill:cursor:{scopeId}
 

@@ -85,7 +85,7 @@ export class AgentCoreRegistryService {
     try {
       const ctrlMod = await import('@aws-sdk/client-bedrock-agentcore-control' as string);
       const dataMod = await import('@aws-sdk/client-bedrock-agentcore' as string);
-      const region = this.registryConfig?.region || config.aws.region || 'us-east-1';
+      const region = this.registryConfig?.region || config.aws.region || 'ap-northeast-1';
 
       this.controlClient = new ctrlMod.BedrockAgentCoreControl({ region });
       this.dataClient = new dataMod.BedrockAgentCore({ region });

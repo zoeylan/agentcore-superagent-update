@@ -39,7 +39,7 @@
       "key": "region",
       "label": { "en": "Region", "cn": "区域" },
       "type": "text",
-      "placeholder": "us-east-1",
+      "placeholder": "ap-northeast-1",
       "required": false
     }
   ],

@@ -212,7 +212,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
   // ---- Anthropic Claude ----
   {
     id: 'claude-opus-4-5',
-    bedrockModelId: 'us.anthropic.claude-opus-4-5-20251101-v1:0',
+    bedrockModelId: 'global.anthropic.claude-opus-4-5-20251101-v1:0',
     provider: 'anthropic',
     displayName: 'Claude Opus 4.5',
     capabilities: { vision: true, toolUse: true, streaming: true, extendedThinking: true },
@@ -220,7 +220,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
   {
     id: 'claude-opus-4-6',
-    bedrockModelId: 'us.anthropic.claude-opus-4-6-v1',
+    bedrockModelId: 'global.anthropic.claude-opus-4-6-v1',
     provider: 'anthropic',
     displayName: 'Claude Opus 4.6',
     capabilities: { vision: true, toolUse: true, streaming: true, extendedThinking: true },
@@ -228,7 +228,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
   {
     id: 'claude-sonnet-4-5',
-    bedrockModelId: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0',
+    bedrockModelId: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
     provider: 'anthropic',
     displayName: 'Claude Sonnet 4.5',
     capabilities: { vision: true, toolUse: true, streaming: true, extendedThinking: true },
@@ -236,7 +236,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
   {
     id: 'claude-sonnet-4-6',
-    bedrockModelId: 'us.anthropic.claude-sonnet-4-6-v1',
+    bedrockModelId: 'global.anthropic.claude-sonnet-4-6-v1',
     provider: 'anthropic',
     displayName: 'Claude Sonnet 4.6',
     capabilities: { vision: true, toolUse: true, streaming: true, extendedThinking: true },
@@ -244,7 +244,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
   {
     id: 'claude-haiku-4-5',
-    bedrockModelId: 'us.anthropic.claude-haiku-4-5-20251001-v1:0',
+    bedrockModelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
     provider: 'anthropic',
     displayName: 'Claude Haiku 4.5',
     capabilities: { vision: true, toolUse: true, streaming: true, extendedThinking: false },
@@ -252,7 +252,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
   {
     id: 'claude-3-5-haiku',
-    bedrockModelId: 'us.anthropic.claude-3-5-haiku-20241022-v1:0',
+    bedrockModelId: 'global.anthropic.claude-3-5-haiku-20241022-v1:0',
     provider: 'anthropic',
     displayName: 'Claude 3.5 Haiku',
     capabilities: { vision: false, toolUse: true, streaming: true, extendedThinking: false },
@@ -325,7 +325,7 @@ export const REASONING_EFFORT_MAP: Record<string, number> = {
 
 export const CACHING_UNSUPPORTED_MODELS = new Set([
   'claude-3-5-haiku',
-  'us.anthropic.claude-3-5-haiku-20241022-v1:0',
+  'global.anthropic.claude-3-5-haiku-20241022-v1:0',
 ]);
 
 export const MODEL_CACHE_MIN_TOKENS: Record<string, number> = {
