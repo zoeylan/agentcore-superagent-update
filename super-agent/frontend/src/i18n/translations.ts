@@ -3650,6 +3650,10 @@ export const translations: TranslationData = {
     en: 'Delete scope',
     cn: '删除业务智能体'
   },
+  'scopeProfile.chatWithAgent': {
+    en: 'Chat with Agent',
+    cn: '与智能体聊天'
+  },
   'scopeProfile.agents': {
     en: 'Agents',
     cn: '智能体'

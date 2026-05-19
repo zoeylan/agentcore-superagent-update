@@ -693,13 +693,23 @@ export function ScopeProfile({ scope, agents, allAgents = [], onDeleteScope, onA
             )}
           </div>
           {onDeleteScope && (
-            <button
-              onClick={() => onDeleteScope(scope.id)}
-              className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
-              title={t('scopeProfile.deleteScope')}
-            >
-              <Trash2 className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate(`/chat?scope=${scope.id}`)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 rounded-lg transition-colors"
+              >
+                <MessageSquare className="w-4 h-4" />
+                {t('scopeProfile.chatWithAgent')}
+              </button>
+              <button
+                onClick={() => onDeleteScope(scope.id)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                title={t('scopeProfile.deleteScope')}
+              >
+                <Trash2 className="w-4 h-4" />
+                {t('scopeProfile.deleteScope')}
+              </button>
+            </div>
           )}
         </div>
 
