@@ -12,7 +12,6 @@
 import { prisma } from '../config/database.js';
 import { Prisma } from '@prisma/client';
 import { AppError } from '../middleware/errorHandler.js';
-import { projectService } from './project.service.js';
 
 // ============================================================================
 // Types
@@ -63,10 +62,7 @@ export class ProjectGovernanceService {
     if (!issue) return;
 
     const project = await prisma.projects.findFirst({ where: { id: projectId, organization_id: orgId } });
-    if (!project?.business_scope_id) {
-      console.log(`[Governance] Skipping enrichment for issue ${issueId}: no business scope`);
-      return;
-    }
+    if (!project) return;
 
     // Mark as analyzing
     await prisma.project_issues.update({
@@ -75,8 +71,6 @@ export class ProjectGovernanceService {
     });
 
     try {
-      const sessionId = await projectService.ensureWorkspaceSession(orgId, projectId, userId);
-
       // Gather context: existing issues in the project
       const existingIssues = await prisma.project_issues.findMany({
         where: { project_id: projectId, id: { not: issueId } },
@@ -116,17 +110,14 @@ Rules:
 - split_suggestions: only if should_split is true. Each sub-task should be independently deliverable.
 - improved_description: provide an improved markdown description ONLY if the original is vague or missing. Otherwise null.`;
 
-      const { chatService } = await import('./chat.service.js');
-      const result = await chatService.processMessage({
-        sessionId,
-        businessScopeId: project.business_scope_id,
-        message: prompt,
-        organizationId: orgId,
-        userId,
-        systemPromptOverride: 'You are a technical project manager with deep domain knowledge. Analyze tasks and provide structured JSON output only. No explanations outside the JSON.',
+      const { aiService } = await import('./ai.service.js');
+      const resultText = await aiService.chatCompletion({
+        system_prompt: 'You are a technical project manager with deep domain knowledge. Analyze tasks and provide structured JSON output only. No explanations outside the JSON. Do NOT use any tools.',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 2048,
       });
 
-      const analysis = this.parseJsonResponse(result.text) as EnrichmentResult | null;
+      const analysis = this.parseJsonResponse(resultText) as EnrichmentResult | null;
 
       // Update issue with analysis results
       const updateData: Record<string, unknown> = {
@@ -209,12 +200,12 @@ Rules:
    * Compare a target issue against all active issues in the project.
    * Detects: conflicts, dependencies, duplicates, related issues.
    */
-  async detectConflicts(orgId: string, projectId: string, issueId: string, userId: string): Promise<void> {
+  async detectConflicts(orgId: string, projectId: string, issueId: string, _userId: string): Promise<void> {
     const issue = await prisma.project_issues.findFirst({ where: { id: issueId, project_id: projectId, organization_id: orgId } });
     if (!issue) return;
 
     const project = await prisma.projects.findFirst({ where: { id: projectId, organization_id: orgId } });
-    if (!project?.business_scope_id) return;
+    if (!project) return;
 
     // Get all active issues (exclude self and done/cancelled)
     const activeIssues = await prisma.project_issues.findMany({
@@ -229,8 +220,6 @@ Rules:
     if (activeIssues.length === 0) return;
 
     try {
-      const sessionId = await projectService.ensureWorkspaceSession(orgId, projectId, userId);
-
       const prompt = `Analyze potential conflicts, dependencies, and duplicates between a target task and existing tasks.
 Use your business domain knowledge to identify logical contradictions, not just textual similarity.
 
@@ -262,17 +251,14 @@ Rules:
 - If no meaningful relations exist, return {"relations": []}
 - Be conservative. Only flag real issues, not superficial similarities.`;
 
-      const { chatService } = await import('./chat.service.js');
-      const result = await chatService.processMessage({
-        sessionId,
-        businessScopeId: project.business_scope_id,
-        message: prompt,
-        organizationId: orgId,
-        userId,
-        systemPromptOverride: 'You are a requirements analyst. Detect conflicts and dependencies between tasks. Output JSON only.',
+      const { aiService } = await import('./ai.service.js');
+      const resultText = await aiService.chatCompletion({
+        system_prompt: 'You are a requirements analyst. Detect conflicts and dependencies between tasks. Output JSON only. Do NOT use any tools.',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 2048,
       });
 
-      const analysis = this.parseJsonResponse(result.text) as { relations?: ConflictRelation[] } | null;
+      const analysis = this.parseJsonResponse(resultText) as { relations?: ConflictRelation[] } | null;
       if (!analysis?.relations?.length) return;
 
       // Clear previous AI-generated relations for this issue
@@ -467,11 +453,9 @@ Rules:
    * Generate a project-level triage report analyzing all backlog/todo issues.
    * Provides: recommended order, merge suggestions, missing info, risk flags.
    */
-  async generateTriageReport(orgId: string, projectId: string, userId: string): Promise<TriageReport> {
+  async generateTriageReport(orgId: string, projectId: string, _userId: string): Promise<TriageReport> {
     const project = await prisma.projects.findFirst({ where: { id: projectId, organization_id: orgId } });
-    if (!project?.business_scope_id) {
-      throw AppError.validation('No business scope configured for this project.');
-    }
+    if (!project) throw AppError.notFound('Project not found');
 
     const backlogIssues = await prisma.project_issues.findMany({
       where: { project_id: projectId, status: { in: ['backlog', 'todo'] } },
@@ -490,8 +474,6 @@ Rules:
       orderBy: { updated_at: 'desc' },
       take: 10,
     });
-
-    const sessionId = await projectService.ensureWorkspaceSession(orgId, projectId, userId);
 
     const prompt = `You are conducting a sprint planning triage for this project.
 Analyze all pending tasks and provide actionable recommendations.
@@ -536,18 +518,16 @@ Rules:
 - risk_flags: technical risks, scope creep, unclear requirements, etc.
 - Be practical and specific. Avoid generic advice.`;
 
-    const { chatService } = await import('./chat.service.js');
-    const result = await chatService.processMessage({
-      sessionId,
-      businessScopeId: project.business_scope_id,
-      message: prompt,
-      organizationId: orgId,
-      userId,
-      systemPromptOverride: 'You are a senior technical project manager conducting sprint planning. Provide structured JSON analysis only.',
+    const { aiService } = await import('./ai.service.js');
+    const resultText = await aiService.chatCompletion({
+      system_prompt: 'You are a senior technical project manager conducting sprint planning. Provide structured JSON analysis only. Do NOT use any tools. Return ONLY the JSON object.',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 4096,
     });
 
-    const report = this.parseJsonResponse(result.text) as TriageReport | null;
+    const report = this.parseJsonResponse(resultText) as TriageReport | null;
     if (!report) {
+      console.error('[Governance] Triage AI response (first 500 chars):', resultText.substring(0, 500));
       throw AppError.internal('Failed to parse triage report from AI response.');
     }
 

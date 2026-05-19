@@ -18,6 +18,7 @@ interface ArtifactListPanelProps {
   isGenerating?: boolean
   onFileOpen?: (path: string, name: string) => void
   onPreviewApp?: (folder: string) => void
+  onPublishApp?: (folder: string) => void
   refreshKey?: number
 }
 
@@ -168,10 +169,11 @@ function flattenToArtifacts(nodes: FileNode[], parentPath = ''): ArtifactItem[] 
   return results
 }
 
-export function ArtifactListPanel({ sessionId, isGenerating, onFileOpen, onPreviewApp, refreshKey }: ArtifactListPanelProps) {
+export function ArtifactListPanel({ sessionId, isGenerating, onFileOpen, onPreviewApp, onPublishApp, refreshKey }: ArtifactListPanelProps) {
   const [artifacts, setArtifacts] = useState<ArtifactItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [detectedAppName, setDetectedAppName] = useState<string | null>(null)
+  const [isPublishing, setIsPublishing] = useState(false)
 
   const loadArtifacts = useCallback(async () => {
     if (!sessionId) { setArtifacts([]); return }
@@ -269,13 +271,28 @@ export function ArtifactListPanel({ sessionId, isGenerating, onFileOpen, onPrevi
                   <p className="text-[10px] text-gray-500">{item.fileCount} 个文件</p>
                 )}
               </div>
-              <button
-                onClick={() => onPreviewApp?.(item.appFolder || item.path)}
-                className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 border border-purple-500/30 transition-colors flex-shrink-0"
-              >
-                <Eye className="w-3 h-3" />
-                Preview
-              </button>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  onClick={() => onPreviewApp?.(item.appFolder || item.path)}
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-purple-600/20 text-purple-300 hover:bg-purple-600/30 border border-purple-500/30 transition-colors"
+                >
+                  <Eye className="w-3 h-3" />
+                  Preview
+                </button>
+                {onPublishApp && (
+                  <button
+                    onClick={async () => {
+                      setIsPublishing(true)
+                      try { await onPublishApp(item.appFolder || item.path) } finally { setIsPublishing(false) }
+                    }}
+                    disabled={isPublishing}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-green-600/20 text-green-300 hover:bg-green-600/30 border border-green-500/30 transition-colors disabled:opacity-50"
+                  >
+                    {isPublishing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Rocket className="w-3 h-3" />}
+                    Publish
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
             <div

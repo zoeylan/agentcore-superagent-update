@@ -235,12 +235,6 @@ export async function showcaseRoutes(fastify: FastifyInstance): Promise<void> {
         created_by: request.user!.id,
       });
 
-      // Also star the session for backward compatibility
-      await prisma.chat_sessions.update({
-        where: { id: session_id },
-        data: { is_starred: true, starred_at: new Date(), starred_by: request.user!.id },
-      });
-
       return reply.status(201).send({ data });
     },
   );

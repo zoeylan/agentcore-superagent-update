@@ -13,8 +13,10 @@ export interface RoomMember {
   id: string;
   session_id: string;
   agent_id: string;
-  role: 'primary' | 'member';
+  role: 'leader' | 'member';
   is_active: boolean;
+  is_leader: boolean;
+  leader_instructions: string | null;
   source_scope_id: string | null;
   joined_at: string;
   agent: {
@@ -131,6 +133,13 @@ export const RestChatRoomService = {
 
   async removeMember(roomId: string, agentId: string): Promise<void> {
     await restClient.delete(`/api/chat/rooms/${roomId}/members/${agentId}`);
+  },
+
+  async setLeader(roomId: string, agentId: string, isLeader: boolean, instructions?: string): Promise<{ members: RoomMember[] }> {
+    return restClient.put<{ members: RoomMember[] }>(`/api/chat/rooms/${roomId}/members/${agentId}/leader`, {
+      is_leader: isLeader,
+      leader_instructions: instructions,
+    });
   },
 
   // Messaging

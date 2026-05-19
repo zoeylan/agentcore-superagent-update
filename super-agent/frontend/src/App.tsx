@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { TranslationProvider } from '@/i18n'
 import { AppShell, ErrorBoundary, ToastProvider, ProtectedRoute, SkillMarketplaceBrowser, AIScopeGenerator, SkillWorkshop } from '@/components'
 import { Dashboard, Chat, WorkflowEditor, Agents, Tools, AgentConfigurator, TaskAuditLog, TaskExecutionCenter, MCPConfigurator, KnowledgeManager, InfrastructureConfigurator, Login, CreateBusinessScope, Marketplace, AppRunner } from '@/pages'
@@ -36,7 +36,8 @@ function AppContent() {
       <Route path="/*" element={
         <AppShell>
           <Routes>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<Navigate to="/showcase" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/chat/room/:roomId" element={<ChatRoomPage />} />
             <Route path="/workflow" element={<WorkflowEditor />} />

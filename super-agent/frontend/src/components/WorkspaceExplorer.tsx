@@ -62,9 +62,11 @@ function isAppFolder(node: FileNode): boolean {
   return node.children.some(c => c.type === 'file' && c.name === 'index.html')
 }
 
-/** Friendly display name: strip .md for agent files */
+/** Friendly display name: strip .md for agent files, rename .claude to .agent, CLAUDE.md to AGENT.md */
 function displayName(node: FileNode): string {
   if (isAgentFile(node)) return node.name.replace(/\.md$/, '')
+  if (node.name === '.claude') return '.agent'
+  if (node.name === 'CLAUDE.md') return 'AGENT.md'
   return node.name
 }
 
@@ -114,7 +116,7 @@ function TreeNode({ node, onFileClick, depth = 0, expandedPaths, onToggle }: {
           ) : (
             <FolderOpen className="w-4 h-4 text-yellow-500 flex-shrink-0" />
           )}
-          <span className="text-sm text-gray-300 truncate">{node.name}</span>
+          <span className="text-sm text-gray-300 truncate">{displayName(node)}</span>
         </button>
         {expanded && node.children?.map((child) => (
           <TreeNode key={child.path} node={child} onFileClick={onFileClick} depth={depth + 1} expandedPaths={expandedPaths} onToggle={onToggle} />
@@ -126,7 +128,7 @@ function TreeNode({ node, onFileClick, depth = 0, expandedPaths, onToggle }: {
   const agent = isAgentFile(node)
   return (
     <button
-      onClick={() => onFileClick(node.path, node.name)}
+      onClick={() => onFileClick(node.path, displayName(node))}
       className="flex items-center gap-1 w-full px-2 py-1 hover:bg-gray-800 rounded text-left group"
       style={{ paddingLeft: `${depth * 12 + 20}px` }}
     >
@@ -259,7 +261,7 @@ export function WorkspaceExplorer({
   // Stop polling after 5 consecutive errors to avoid hammering a dead backend.
   useEffect(() => {
     if (!sessionId) return
-    const interval = isGenerating ? 5000 : 30000
+    const interval = isGenerating ? 3000 : 5000
     const id = setInterval(() => {
       if (pollErrorCount.current >= 5) return // back off on persistent errors
       void loadFiles(true)

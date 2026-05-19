@@ -9,8 +9,10 @@ export interface ChatRoomMemberEntity {
   id: string;
   session_id: string;
   agent_id: string;
-  role: 'primary' | 'member';
+  role: 'leader' | 'member';
   is_active: boolean;
+  is_leader: boolean;
+  leader_instructions: string | null;
   added_by: string | null;
   source_scope_id: string | null;
   joined_at: Date;

@@ -1,5 +1,5 @@
 import { Users, Monitor, Megaphone, DollarSign, Headphones, Briefcase, Settings, TrendingUp, Search, User, LayoutGrid, List } from 'lucide-react'
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { Agent, AgentStatus } from '@/types'
 import { useTranslation } from '@/i18n'
 import { useBusinessScopes } from '@/services/useBusinessScopes'
@@ -49,6 +49,14 @@ export function AgentList({ agents, selectedAgentId, selectedScopeId, onSelectAg
   const { businessScopes } = useBusinessScopes()
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState<'list' | 'card'>('list')
+  const selectedRef = useRef<HTMLElement>(null)
+
+  // Scroll selected item into view on mount or selection change
+  useEffect(() => {
+    if (selectedRef.current) {
+      selectedRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  }, [selectedAgentId, selectedScopeId])
 
   const query = search.trim().toLowerCase()
 
@@ -140,6 +148,7 @@ export function AgentList({ agents, selectedAgentId, selectedScopeId, onSelectAg
     return (
       <button
         key={agent.id}
+        ref={isSelected ? selectedRef as React.RefObject<HTMLButtonElement> : undefined}
         onClick={() => onSelectAgent(agent.id)}
         className={`
           w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all
@@ -193,7 +202,7 @@ export function AgentList({ agents, selectedAgentId, selectedScopeId, onSelectAg
     const showImage = shouldShowAvatarImage(scope.avatar ?? null)
 
     return (
-      <div key={scopeId} className="px-2 mb-1">
+      <div key={scopeId} className="px-2 mb-1" ref={isSelected ? selectedRef as React.RefObject<HTMLDivElement> : undefined}>
         <button
           onClick={() => onSelectScope(scopeId)}
           className={`
@@ -278,6 +287,7 @@ export function AgentList({ agents, selectedAgentId, selectedScopeId, onSelectAg
             <div key={scopeId} className="mb-4">
               {/* Scope Header — clickable with "View" badge */}
               <div
+                ref={selectedScopeId === scopeId && !selectedAgentId ? selectedRef as React.RefObject<HTMLDivElement> : undefined}
                 onClick={() => onSelectScope(scopeId)}
                 className={`flex items-center gap-2 px-3 py-2 sticky top-0 z-10 w-full text-left transition-colors rounded cursor-pointer ${
                   selectedScopeId === scopeId && !selectedAgentId

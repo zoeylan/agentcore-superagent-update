@@ -237,7 +237,8 @@ export class ChatService {
    */
   async processMessage(options: {
     sessionId?: string;
-    businessScopeId: string;
+    businessScopeId?: string;
+    agentId?: string;
     message: string;
     organizationId: string;
     userId: string;

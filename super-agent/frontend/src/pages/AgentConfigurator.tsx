@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Loader2, Save, CheckCircle, AlertCircle, Plus, X, Pencil, Zap, Upload } from 'lucide-react'
 import { useTranslation } from '@/i18n'
 import { useAgents } from '@/services'
@@ -38,6 +38,8 @@ const SIMPLE_STATUSES: Array<{ value: AgentStatus; labelKey: string }> = [
 export function AgentConfigurator() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const scopeFromQuery = searchParams.get('scope')
   const { agentId } = useParams<{ agentId: string }>()
   const { getAgentById, updateAgent } = useAgents()
   const { businessScopes } = useBusinessScopes()
@@ -224,6 +226,7 @@ export function AgentConfigurator() {
         const created = await restClient.post<{ id: string }>('/api/agents', {
           name: form.internalName,
           display_name: form.displayName,
+          business_scope_id: scopeFromQuery || null,
           role: form.role || null,
           avatar: form.avatar || null,
           status: form.status,
@@ -234,8 +237,9 @@ export function AgentConfigurator() {
         })
         setIsSaving(false)
         showToast('success', t('agentConfig.agentCreated'))
-        // Navigate to the new agent's page
-        setTimeout(() => navigate(`/agents?id=${created.id}`), 500)
+        // Navigate back to scope page if created from scope, otherwise to agent detail
+        const returnTo = scopeFromQuery ? `/agents?scope=${scopeFromQuery}` : `/agents?id=${created.id}`
+        setTimeout(() => navigate(returnTo), 500)
       } catch (err) {
         setIsSaving(false)
         showToast('error', err instanceof Error ? err.message : 'Failed to create agent')
@@ -673,7 +677,7 @@ export function AgentConfigurator() {
                     <div>
                       <p className="text-sm text-white">Enable A2A Protocol</p>
                       <p className="text-xs text-gray-500 mt-0.5">
-                        Register this Agent to AgentCore Registry for external discovery and invocation
+                        Enable external discovery and invocation via A2A protocol
                       </p>
                     </div>
                     <button
@@ -735,8 +739,7 @@ export function AgentConfigurator() {
                       {/* Info box */}
                       <div className="p-3 bg-blue-900/10 border border-blue-500/20 rounded-lg">
                         <p className="text-xs text-blue-400">
-                          When enabled, this Agent will be registered to AWS AgentCore Registry.
-                          External systems can discover it via semantic search and invoke it through the A2A protocol endpoint.
+                          When enabled, this Agent can be discovered and invoked by external systems through the A2A protocol endpoint.
                         </p>
                       </div>
                     </div>

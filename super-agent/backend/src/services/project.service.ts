@@ -103,7 +103,7 @@ export class ProjectService {
 
   async updateProject(orgId: string, projectId: string, userId: string, input: Partial<CreateProjectInput>) {
     await this.getProject(orgId, projectId, userId); // access check
-    return prisma.projects.update({
+    const updated = await prisma.projects.update({
       where: { id: projectId },
       data: {
         ...(input.name !== undefined && { name: input.name.trim() }),
@@ -115,6 +115,25 @@ export class ProjectService {
         ...(input.settings !== undefined && { settings: input.settings as Prisma.InputJsonValue }),
       },
     });
+
+    // When scope changes, also update the existing workspace session's scope
+    if (input.business_scope_id && updated.workspace_session_id) {
+      prisma.chat_sessions.update({
+        where: { id: updated.workspace_session_id },
+        data: { business_scope_id: input.business_scope_id },
+      }).catch(() => {});
+    }
+
+    // Auto-import scope agents into squad when business_scope_id is set
+    if (input.business_scope_id) {
+      import('./project-squad.service.js').then(({ projectSquadService }) => {
+        projectSquadService.importFromScope(orgId, projectId).catch(err => {
+          console.error(`[ProjectService] Auto-import scope agents failed:`, err instanceof Error ? err.message : err);
+        });
+      }).catch(() => {});
+    }
+
+    return updated;
   }
 
   async deleteProject(orgId: string, projectId: string, userId: string) {
@@ -328,15 +347,23 @@ export class ProjectService {
 
     console.log(`[ProjectService] Project agent_id=${project.agent_id}, business_scope_id=${project.business_scope_id}`);
 
-    // Early check: business_scope_id is required for agent execution
-    if (!project.business_scope_id) {
-      console.log(`[ProjectService] No business scope configured for project ${projectId}. Cannot execute.`);
-      throw AppError.validation('No business scope configured for this project. Go to Project Settings to assign a scope before executing tasks.');
+    // Determine which agent should execute this issue (squad-aware)
+    const { projectSquadService } = await import('./project-squad.service.js');
+    const executionAgentId = await projectSquadService.getExecutionAgent(orgId, projectId, issueId)
+      ?? project.agent_id;
+
+    // If issue has no assigned agent yet, try auto-assignment
+    if (!issue.assigned_agent_id) {
+      const labels = (issue.labels as string[]) ?? [];
+      const assignedId = await projectSquadService.assignIssueToAgent(orgId, projectId, issueId, labels);
+      if (assignedId) {
+        console.log(`[ProjectService] Auto-assigned issue ${issueId} to agent ${assignedId}`);
+      }
     }
 
     // Ensure project workspace exists
     const sessionId = await this.ensureWorkspaceSession(orgId, projectId, userId);
-    console.log(`[ProjectService] Workspace session: ${sessionId}`);
+    console.log(`[ProjectService] Workspace session: ${sessionId}, executionAgent: ${executionAgentId}`);
 
     const slug = issue.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').substring(0, 40);
     const branchName = `issue/${issue.issue_number}/${slug}`;
@@ -363,32 +390,27 @@ export class ProjectService {
 
     // Actually send the task to the agent via the workspace session
     const taskMessage = [
-      `You are a software developer working on a project.`,
-      `Your workspace is ready for coding. You have full access to create files, run commands, and build software.`,
-      ``,
       `## Task`,
       `**Issue #${issue.issue_number}: ${issue.title}**`,
       issue.description ? `\n### Description\n${issue.description}` : '',
       ``,
       `## Instructions`,
-      `1. All source code MUST be created inside the \`app/\` directory. Create it if it doesn't exist.`,
-      `2. Do NOT place source files in the workspace root — the root is reserved for system files (.claude/, documents/, memories/).`,
-      `3. Inside \`app/\`, organize files with a clear structure (e.g., \`app/src/\`, \`app/public/\`, \`app/package.json\`).`,
-      `4. Make sure the code is functional and well-structured.`,
-      `5. After writing the code, briefly summarize what you created.`,
+      `Use the \`app-builder\` skill to implement this task. The app-builder skill knows how to properly structure the app/ directory, create the right files, and produce a previewable/publishable application.`,
+      ``,
+      `If the app/ directory already exists with code from previous tasks, build upon it rather than starting from scratch.`,
+      ``,
+      `After completing the implementation, briefly summarize what you built.`,
       project.repo_url ? `\nRepository: ${project.repo_url}` : '',
       `\nBranch: \`${branchName}\``,
     ].filter(Boolean).join('\n');
 
-    // System prompt override: tell the agent it's a software developer, not a business consultant
+    // System prompt override
     const devSystemPrompt = [
-      `You are a senior software developer. Your job is to implement coding tasks by writing real, functional code.`,
-      `You are working in a project workspace. Use your tools to create files, write code, and run commands.`,
-      `IMPORTANT: All source code files MUST go inside the \`app/\` directory. Never create source files in the workspace root.`,
-      `The workspace root contains system directories (.claude/, documents/, memories/) — do not mix application code with them.`,
-      `Do NOT refuse to write code. Do NOT say the workspace is misconfigured. Just implement the task.`,
-      `Focus on writing clean, working code. Create all necessary files inside \`app/\`.`,
-      project.repo_url ? `The project repository is: ${project.repo_url}` : '',
+      `You are a senior software developer working on a project. Use the skills available in your workspace (especially app-builder) to implement tasks.`,
+      `Your workspace has skills in .claude/skills/ — use them when relevant. The app-builder skill is the primary tool for creating and modifying application code.`,
+      `All application code goes in the app/ directory. The workspace root (.claude/, documents/, memories/) is for system files only.`,
+      `Build upon existing code in app/ when it exists. Do not start from scratch unless the task explicitly requires it.`,
+      project.repo_url ? `Project repository: ${project.repo_url}` : '',
       project.default_branch ? `Default branch: ${project.default_branch}` : '',
     ].filter(Boolean).join('\n');
 
@@ -404,46 +426,111 @@ export class ProjectService {
     }, orgId);
 
     console.log(`[ProjectService] Task message persisted to session. Checking agent config...`);
-    console.log(`[ProjectService] Sending task to agent via chatService.processMessage. scopeId=${project.business_scope_id}, agentId=${project.agent_id}`);
+    console.log(`[ProjectService] Sending task to agent. scopeId=${project.business_scope_id}, executionAgentId=${executionAgentId}`);
     this.executingIssues.add(issueId);
+
+    const resolvedAgentId = executionAgentId ?? project.agent_id;
+
+    // Unified execution: ALL agents work in the project's workspace.
+    // Resolve the execution agent: squad assignment > project agent_id > squad leader
+    const effectiveAgentId = resolvedAgentId ?? project.agent_id;
+
+    if (!effectiveAgentId) {
+      // No agent configured at all — try to find one from squad
+      const { projectSquadService: squadSvc } = await import('./project-squad.service.js');
+      const leader = await squadSvc.getLeader(projectId);
+      if (!leader) {
+        throw AppError.validation('No agent configured for this project. Add agents to the project squad or assign a business scope.');
+      }
+      // Use the leader
+      console.log(`[ProjectService] No explicit agent, using squad leader: ${leader.agent.display_name}`);
+    }
+
+    const agentIdForExecution = effectiveAgentId ?? (await (async () => {
+      const { projectSquadService: squadSvc } = await import('./project-squad.service.js');
+      const leader = await squadSvc.getLeader(projectId);
+      return leader?.agent_id ?? null;
+    })());
+
+    if (!agentIdForExecution) {
+      throw AppError.validation('No agent available to execute this issue. Configure a business scope or add agents to the project squad.');
+    }
+
+    // Resolve the agent's scope for workspace provisioning.
+    // Priority: project.business_scope_id > agent's own scope
+    const agentRecord = await prisma.agents.findFirst({
+      where: { id: agentIdForExecution },
+      select: { business_scope_id: true },
+    });
+    const effectiveScopeId = project.business_scope_id ?? agentRecord?.business_scope_id;
+
+    if (!effectiveScopeId) {
+      throw AppError.validation('No business scope available. The project or the assigned agent must have a business scope for workspace provisioning.');
+    }
+
+    // Ensure the workspace session uses the effective scope
+    if (effectiveScopeId) {
+      await prisma.chat_sessions.update({
+        where: { id: sessionId },
+        data: { business_scope_id: effectiveScopeId },
+      }).catch(() => {});
+    }
+
+    console.log(`[ProjectService] Executing issue ${issueId} with agent ${agentIdForExecution} in scope ${effectiveScopeId}`);
+
     const { chatService } = await import('./chat.service.js');
     chatService.processMessage({
       sessionId,
-      businessScopeId: project.business_scope_id,
+      businessScopeId: effectiveScopeId,
+      agentId: agentIdForExecution,
       message: taskMessage,
       organizationId: orgId,
       userId,
       systemPromptOverride: devSystemPrompt,
     }).then(async (result) => {
-        console.log(`[ProjectService] Agent responded for issue ${issueId}. Response length: ${result.text.length}`);
-        // Persist agent response
+      console.log(`[ProjectService] Agent responded for issue ${issueId}. Response length: ${result.text.length}`);
+
+      // Detect empty/failed responses from AgentCore
+      const isEmptyResponse = !result.text || result.text === '(No response)' || result.text.trim().length < 10;
+      if (isEmptyResponse) {
+        console.warn(`[ProjectService] Agent returned empty response for issue ${issueId}. Treating as failure.`);
         await chatMessageRepository.create({
           session_id: sessionId,
           type: 'ai',
-          content: result.text,
-          agent_id: project.agent_id ?? null,
+          content: 'Agent execution returned no output. The runtime may be unavailable. Please try again.',
+          agent_id: agentIdForExecution,
           mention_agent_id: null,
-          metadata: { source: 'project_agent_response', issue_id: issueId },
+          metadata: { source: 'project_agent_error', issue_id: issueId, reason: 'empty_response' },
         }, orgId).catch(() => {});
+        // Don't move back to todo (avoid auto-process loop) — leave in_progress for user to retry
+        return;
+      }
 
-        // Auto-transition: move issue to in_review when agent completes
-        await this.completeIssueExecution(orgId, projectId, issueId, 'in_review', userId);
-      }).catch(async (err) => {
-        console.error(`[ProjectService] Agent execution FAILED for issue ${issueId}:`, err.message || err);
-        await chatMessageRepository.create({
-          session_id: sessionId,
-          type: 'ai',
-          content: `Agent execution failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-          agent_id: null,
-          mention_agent_id: null,
-          metadata: { source: 'project_agent_error', issue_id: issueId },
-        }, orgId).catch(() => {});
+      await chatMessageRepository.create({
+        session_id: sessionId,
+        type: 'ai',
+        content: result.text,
+        agent_id: agentIdForExecution,
+        mention_agent_id: null,
+        metadata: { source: 'project_agent_response', issue_id: issueId },
+      }, orgId).catch(() => {});
 
-        // On failure, move back to todo so auto-process can retry or user can intervene
-        await this.completeIssueExecution(orgId, projectId, issueId, 'todo', userId);
-      }).finally(() => {
-        this.executingIssues.delete(issueId);
-      });
+      await this.completeIssueExecution(orgId, projectId, issueId, 'in_review', userId);
+    }).catch(async (err) => {
+      console.error(`[ProjectService] Agent execution FAILED for issue ${issueId}:`, err.message || err);
+      await chatMessageRepository.create({
+        session_id: sessionId,
+        type: 'ai',
+        content: `Agent execution failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        agent_id: null,
+        mention_agent_id: null,
+        metadata: { source: 'project_agent_error', issue_id: issueId },
+      }, orgId).catch(() => {});
+
+      await this.completeIssueExecution(orgId, projectId, issueId, 'todo', userId);
+    }).finally(() => {
+      this.executingIssues.delete(issueId);
+    });
 
     return { issue: updated, session_id: sessionId, branch_name: branchName };
   }
@@ -652,13 +739,9 @@ ${project.repo_url ? `Repository: ${project.repo_url}` : ''}`
 Title: ${issue.title}
 ${project.repo_url ? `Repository: ${project.repo_url}` : ''}`;
 
-    if (!project.business_scope_id) {
-      throw AppError.validation('No business scope configured for this project. Assign a scope in project settings to enable AI features.');
-    }
-
     const result = await chatService.processMessage({
       sessionId,
-      businessScopeId: project.business_scope_id,
+      businessScopeId: project.business_scope_id ?? undefined,
       message,
       organizationId: orgId,
       userId,
@@ -685,18 +768,19 @@ ${project.repo_url ? `Repository: ${project.repo_url}` : ''}`;
    * Sync workspace files from S3 back to local filesystem.
    * Useful after AgentCore container has written files that need to be visible locally.
    */
-  async syncWorkspaceFromS3(orgId: string, projectId: string, userId: string): Promise<{ synced: number; path: string }> {
+  async syncWorkspaceFromS3(orgId: string, projectId: string, _userId: string): Promise<{ synced: number; path: string }> {
     const project = await prisma.projects.findFirst({ where: { id: projectId, organization_id: orgId } });
     if (!project) throw AppError.notFound('Project not found');
     if (!project.workspace_session_id) throw AppError.validation('No workspace session exists for this project');
-    if (!project.business_scope_id) throw AppError.validation('No business scope configured');
 
     const { workspaceManager } = await import('./workspace-manager.js');
     const { config: appConfig } = await import('../config/index.js');
 
-    const localPath = workspaceManager.getSessionWorkspacePath(orgId, project.business_scope_id, project.workspace_session_id);
+    // Use business_scope_id if available, otherwise use projectId as the scope path segment
+    const scopeSegment = project.business_scope_id ?? projectId;
+    const localPath = workspaceManager.getSessionWorkspacePath(orgId, scopeSegment, project.workspace_session_id);
     const s3Bucket = appConfig.agentcore.workspaceS3Bucket;
-    const s3Prefix = `${orgId}/${project.business_scope_id}/${project.workspace_session_id}/`;
+    const s3Prefix = `${orgId}/${scopeSegment}/${project.workspace_session_id}/`;
 
     // Use the S3 client from workspace manager to download files
     const { S3Client, ListObjectsV2Command, GetObjectCommand } = await import('@aws-sdk/client-s3');
@@ -752,14 +836,15 @@ ${project.repo_url ? `Repository: ${project.repo_url}` : ''}`;
    */
   private async fetchAndStoreDiff(orgId: string, projectId: string, issueId: string): Promise<void> {
     const project = await prisma.projects.findFirst({ where: { id: projectId, organization_id: orgId } });
-    if (!project?.workspace_session_id || !project.business_scope_id) return;
+    if (!project?.workspace_session_id) return;
 
     const { config: appConfig } = await import('../config/index.js');
     const { S3Client, GetObjectCommand, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
 
+    const scopeSegment = project.business_scope_id ?? projectId;
     const s3Client = new S3Client({ region: appConfig.agentcore.region || 'us-east-1' });
     const s3Bucket = appConfig.agentcore.workspaceS3Bucket;
-    const s3Prefix = `${orgId}/${project.business_scope_id}/${project.workspace_session_id}/`;
+    const s3Prefix = `${orgId}/${scopeSegment}/${project.workspace_session_id}/`;
     const diffKey = `${s3Prefix}__diff__.json`;
 
     try {

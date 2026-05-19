@@ -195,11 +195,12 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
         </div>
       </div>
 
-      {/* Member bar — all agents equal, click to @mention */}
+      {/* Member bar — click to @mention, leader has crown */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-800/50 overflow-x-auto">
         {members.map(m => {
           const isActive = m.agent_id === activeAgentId;
           const isMentioned = m.agent_id === mentionAgentId;
+          const isLeader = m.is_leader;
           return (
             <button
               key={m.agent_id}
@@ -209,11 +210,13 @@ export function ChatRoom({ roomId }: ChatRoomProps) {
                   ? 'bg-green-600/20 text-green-300 border border-green-500/40 animate-pulse'
                   : isMentioned
                     ? 'bg-blue-600/20 text-blue-300 border border-blue-500/40 ring-1 ring-blue-400/50'
-                    : 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700'
+                    : isLeader
+                      ? 'bg-yellow-600/10 text-yellow-300 border border-yellow-500/30 hover:bg-yellow-600/20'
+                      : 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700'
               }`}
-              title={isActive ? `${m.agent.display_name} is responding...` : `Click to @mention ${m.agent.display_name}`}
+              title={isActive ? `${m.agent.display_name} is responding...` : isLeader ? `${m.agent.display_name} (Leader) — Click to @mention` : `Click to @mention ${m.agent.display_name}`}
             >
-              <Bot size={10} />
+              {isLeader ? <span className="text-yellow-400 text-[10px]">👑</span> : <Bot size={10} />}
               {m.agent.display_name}
             </button>
           );

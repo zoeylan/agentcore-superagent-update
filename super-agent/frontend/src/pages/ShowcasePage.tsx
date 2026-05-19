@@ -17,7 +17,7 @@ import { useTranslation } from '@/i18n'
 import {
   Star, Loader2, Play, Settings, Plus, Pencil, Trash2, X,
   ChevronRight, MessageSquare, Clock, Heart, Download, Sparkles,
-  Zap, Users, Brain, CheckCircle2, Rocket,
+  Zap, Users, Brain, CheckCircle2, Rocket, Check, ArrowRight, Bot,
 } from 'lucide-react'
 import { restClient } from '@/services/api/restClient'
 import { useToast } from '@/components'
@@ -84,6 +84,16 @@ export function ShowcasePage() {
   const [showAdmin, setShowAdmin] = useState(false)
   const [deployedScopes, setDeployedScopes] = useState<Set<string>>(new Set())
   const [deploying, setDeploying] = useState<string | null>(null)
+  // Deployment progress modal state
+  const [deployModal, setDeployModal] = useState<{
+    visible: boolean
+    phase: 'deploying' | 'done'
+    caseName: string
+    agentCount: number
+    hasWorkflow: boolean
+    scopeId?: string
+    prompt?: string
+  }>({ visible: false, phase: 'deploying', caseName: '', agentCount: 0, hasWorkflow: false })
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -116,7 +126,19 @@ export function ShowcasePage() {
     const scopeDir = config.scope_dir as string || config.twin_dir as string
     if (!packId) return
 
+    const agentCount = (config.agent_count as number) || 0
+    const hasWorkflow = !!(config.has_workflow as boolean)
+
+    // Show deployment progress modal
+    setDeployModal({
+      visible: true,
+      phase: 'deploying',
+      caseName: c.title,
+      agentCount,
+      hasWorkflow,
+    })
     setDeploying(c.id)
+
     let scopeId: string | undefined
     let deployError: string | null = null
 
@@ -140,26 +162,26 @@ export function ShowcasePage() {
 
     setDeploying(null)
 
-    // If deploy failed and we have no scopeId, don't navigate — show error toast.
+    // If deploy failed, close modal and show error toast.
     if (!scopeId) {
+      setDeployModal(prev => ({ ...prev, visible: false }))
       toast.error(deployError || '部署失败：未能获取业务场景 ID')
       return
     }
 
-    // Clear any stale chat state so we start fresh in the newly deployed scope.
-    // Without this, ChatProvider would fall back to getStoredScopeId() if URL params
-    // somehow get dropped, leaving user stuck on the previous scope.
-    localStorage.removeItem('super-agent-chat-backend-session')
-    localStorage.removeItem('super-agent-chat-scope')
-    RestChatService.resetSession()
-
-    // Navigate to chat with the deployed scope + initial prompt.
-    const params = new URLSearchParams()
-    params.set('scope', scopeId)
+    // Show "done" phase with summary
     const prompt = c.initial_prompt || c.description
-    if (prompt) params.set('prompt', prompt)
-    params.set('t', Date.now().toString()) // force remount
-    navigate(`/chat?${params.toString()}`)
+    setDeployModal(prev => ({ ...prev, phase: 'done', scopeId, prompt: prompt || undefined }))
+  }
+
+  const handleDeployModalContinue = () => {
+    const { scopeId } = deployModal
+    setDeployModal(prev => ({ ...prev, visible: false }))
+
+    if (!scopeId) return
+
+    // Navigate to the scope management page (Agents page filtered by this scope)
+    navigate(`/agents?scope=${scopeId}`)
   }
 
   const isDeployed = (c: ShowcaseCase) => {
@@ -302,6 +324,166 @@ export function ShowcasePage() {
           onDataChanged={() => { loadData() }}
         />
       )}
+
+      {/* Deployment Progress Modal */}
+      {deployModal.visible && (
+        <DeployProgressModal
+          phase={deployModal.phase}
+          caseName={deployModal.caseName}
+          agentCount={deployModal.agentCount}
+          hasWorkflow={deployModal.hasWorkflow}
+          onContinue={handleDeployModalContinue}
+          onClose={() => setDeployModal(prev => ({ ...prev, visible: false }))}
+        />
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
+// Deployment Progress Modal — shows step-by-step what's being created
+// ============================================================================
+
+function DeployProgressModal({ phase, caseName, agentCount, hasWorkflow, onContinue, onClose }: {
+  phase: 'deploying' | 'done'
+  caseName: string
+  agentCount: number
+  hasWorkflow: boolean
+  onContinue: () => void
+  onClose: () => void
+}) {
+  const [visibleSteps, setVisibleSteps] = useState(0)
+
+  const steps = [
+    { label: '创建业务域 (Business Scope)', icon: Rocket },
+    ...(agentCount > 0 ? [{ label: `配置 ${agentCount} 个 AI Agent`, icon: Bot }] : [{ label: '配置 AI Agent', icon: Bot }]),
+    { label: '加载技能包与知识库', icon: Brain },
+    ...(hasWorkflow ? [{ label: '部署自动化工作流', icon: Zap }] : []),
+    { label: '初始化运行环境', icon: Sparkles },
+  ]
+
+  useEffect(() => {
+    if (phase === 'deploying') {
+      setVisibleSteps(0)
+      const interval = setInterval(() => {
+        setVisibleSteps(prev => {
+          if (prev >= steps.length) { clearInterval(interval); return prev }
+          return prev + 1
+        })
+      }, 600)
+      return () => clearInterval(interval)
+    } else {
+      // When done, show all steps immediately
+      setVisibleSteps(steps.length)
+    }
+  }, [phase, steps.length])
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="bg-gray-800 rounded-2xl border border-gray-700 shadow-2xl w-full max-w-md overflow-hidden">
+        {/* Header */}
+        <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+              phase === 'done' ? 'bg-emerald-500/20' : 'bg-blue-500/20'
+            }`}>
+              {phase === 'done' ? (
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+              ) : (
+                <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+              )}
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-white">
+                {phase === 'done' ? '部署完成' : '正在部署'}
+              </h3>
+              <p className="text-xs text-gray-500">{caseName}</p>
+            </div>
+          </div>
+          {phase === 'done' && (
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-500">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5">
+          <div className="space-y-3">
+            {steps.map((step, i) => {
+              const isVisible = i < visibleSteps
+              const isComplete = phase === 'done' || i < visibleSteps - 1
+              const isCurrent = phase === 'deploying' && i === visibleSteps - 1
+
+              return (
+                <div
+                  key={i}
+                  className={`flex items-center gap-3 transition-all duration-300 ${
+                    isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
+                  }`}
+                >
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition-colors duration-300 ${
+                    isComplete
+                      ? 'bg-emerald-500/20'
+                      : isCurrent
+                        ? 'bg-blue-500/20'
+                        : 'bg-gray-700'
+                  }`}>
+                    {isComplete ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : isCurrent ? (
+                      <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin" />
+                    ) : (
+                      <step.icon className="w-3 h-3 text-gray-500" />
+                    )}
+                  </div>
+                  <span className={`text-sm ${
+                    isComplete ? 'text-gray-300' : isCurrent ? 'text-white font-medium' : 'text-gray-500'
+                  }`}>
+                    {step.label}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Done summary */}
+          {phase === 'done' && (
+            <div className="mt-5 p-3 bg-gray-900 rounded-xl border border-gray-700">
+              <p className="text-xs text-gray-400 mb-2">已为你创建</p>
+              <div className="flex items-center gap-4 text-xs">
+                <span className="flex items-center gap-1 text-blue-400">
+                  <Bot className="w-3.5 h-3.5" />
+                  {agentCount || 1} Agent
+                </span>
+                {hasWorkflow && (
+                  <span className="flex items-center gap-1 text-amber-400">
+                    <Zap className="w-3.5 h-3.5" />
+                    含工作流
+                  </span>
+                )}
+                <span className="flex items-center gap-1 text-purple-400">
+                  <Brain className="w-3.5 h-3.5" />
+                  技能包已加载
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {phase === 'done' && (
+          <div className="px-6 py-4 border-t border-gray-700">
+            <button
+              onClick={onContinue}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 transition-colors"
+            >
+              查看详情
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

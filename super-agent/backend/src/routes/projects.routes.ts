@@ -7,6 +7,8 @@ import { FastifyInstance } from 'fastify';
 import { authenticate, requireModifyAccess } from '../middleware/auth.js';
 import { projectService } from '../services/project.service.js';
 import { governanceService } from '../services/project-governance.service.js';
+import { projectSquadService } from '../services/project-squad.service.js';
+import { triageActionsService } from '../services/project-triage-actions.service.js';
 
 export async function projectRoutes(fastify: FastifyInstance): Promise<void> {
 
@@ -333,7 +335,37 @@ export async function projectRoutes(fastify: FastifyInstance): Promise<void> {
       const report = await governanceService.generateTriageReport(
         request.user!.orgId, request.params.id, request.user!.id,
       );
-      return reply.send(report);
+      // Also generate suggested actions from the report
+      const actions = triageActionsService.generateSuggestedActions(report);
+      return reply.send({ ...report, suggested_actions: actions });
+    }
+  );
+
+  /**
+   * POST /:id/triage/execute-action — Execute a structured triage action
+   */
+  fastify.post<{ Params: { id: string }; Body: { action: { type: string; label: string; description: string; params: Record<string, unknown> } } }>(
+    '/:id/triage/execute-action',
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      const result = await triageActionsService.executeAction(
+        request.user!.orgId, request.params.id, request.body.action as import('../services/project-triage-actions.service.js').TriageAction, request.user!.id,
+      );
+      return reply.send(result);
+    }
+  );
+
+  /**
+   * POST /:id/triage/execute-custom — Execute a natural language instruction
+   */
+  fastify.post<{ Params: { id: string }; Body: { instruction: string } }>(
+    '/:id/triage/execute-custom',
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      const result = await triageActionsService.executeNaturalLanguage(
+        request.user!.orgId, request.params.id, request.body.instruction, request.user!.id,
+      );
+      return reply.send(result);
     }
   );
 
@@ -362,4 +394,109 @@ export async function projectRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.send(diff);
     }
   );
+
+  // ==========================================================================
+  // Project Squad (Multi-Agent Team)
+  // ==========================================================================
+
+  /** GET /:id/agents — List all agents in the project squad */
+  fastify.get<{ Params: { id: string } }>(
+    '/:id/agents',
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      const agents = await projectSquadService.listProjectAgents(request.user!.orgId, request.params.id);
+      return reply.send({ data: agents });
+    }
+  );
+
+  /** POST /:id/agents — Add an agent to the project squad */
+  fastify.post<{
+    Params: { id: string };
+    Body: { agent_id: string; role?: string; is_leader?: boolean; auto_assign_labels?: string[]; instructions?: string };
+  }>(
+    '/:id/agents',
+    { preHandler: [authenticate, requireModifyAccess] },
+    async (request, reply) => {
+      const agent = await projectSquadService.addAgent(request.user!.orgId, request.params.id, request.body);
+      return reply.status(201).send(agent);
+    }
+  );
+
+  /** PUT /:id/agents/:agentId — Update a project agent's role/config */
+  fastify.put<{
+    Params: { id: string; agentId: string };
+    Body: { role?: string; is_leader?: boolean; auto_assign_labels?: string[]; instructions?: string };
+  }>(
+    '/:id/agents/:agentId',
+    { preHandler: [authenticate, requireModifyAccess] },
+    async (request, reply) => {
+      const agent = await projectSquadService.updateAgent(
+        request.user!.orgId, request.params.id, request.params.agentId, request.body,
+      );
+      return reply.send(agent);
+    }
+  );
+
+  /** DELETE /:id/agents/:agentId — Remove an agent from the project squad */
+  fastify.delete<{ Params: { id: string; agentId: string } }>(
+    '/:id/agents/:agentId',
+    { preHandler: [authenticate, requireModifyAccess] },
+    async (request, reply) => {
+      await projectSquadService.removeAgent(request.user!.orgId, request.params.id, request.params.agentId);
+      return reply.status(204).send();
+    }
+  );
+
+  /** POST /:id/issues/:issueId/assign — Auto-assign an issue to the best agent */
+  fastify.post<{ Params: { id: string; issueId: string } }>(
+    '/:id/issues/:issueId/assign',
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      const issue = await projectService.getIssue(request.user!.orgId, request.params.id, request.params.issueId);
+      const labels = (issue as Record<string, unknown>).labels as string[] ?? [];
+      const assignedAgentId = await projectSquadService.assignIssueToAgent(
+        request.user!.orgId, request.params.id, request.params.issueId, labels,
+      );
+      return reply.send({ assigned_agent_id: assignedAgentId });
+    }
+  );
+
+  /** POST /:id/agents/import-from-scope — Import all scope agents into the squad */
+  fastify.post<{ Params: { id: string } }>(
+    '/:id/agents/import-from-scope',
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      const result = await projectSquadService.importFromScope(request.user!.orgId, request.params.id);
+      return reply.send(result);
+    }
+  );
+
+  /** POST /:id/agents/sync-workspace — Sync all squad agent definitions to workspace */
+  fastify.post<{ Params: { id: string } }>(
+    '/:id/agents/sync-workspace',
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      const agents = await projectSquadService.listProjectAgents(request.user!.orgId, request.params.id);
+      const project = await projectService.getProject(request.user!.orgId, request.params.id, request.user!.id);
+      let synced = 0;
+      for (const pa of agents) {
+        try {
+          await (projectSquadService as any).syncAgentToWorkspace(request.user!.orgId, project, pa.agent_id);
+          synced++;
+        } catch { /* skip */ }
+      }
+      return reply.send({ synced, total: agents.length });
+    }
+  );
+
+  /** POST /:id/agents/recommend — AI-powered squad recommendation */
+  fastify.post<{ Params: { id: string } }>(
+    '/:id/agents/recommend',
+    { preHandler: [authenticate] },
+    async (request, reply) => {
+      const result = await projectSquadService.recommendSquad(request.user!.orgId, request.params.id);
+      return reply.send(result);
+    }
+  );
 }
+

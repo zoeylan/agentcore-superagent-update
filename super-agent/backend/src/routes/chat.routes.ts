@@ -139,7 +139,7 @@ interface WorkspaceCacheEntry {
   expiresAt: number;
 }
 const workspaceFileCache = new Map<string, WorkspaceCacheEntry>();
-const WORKSPACE_CACHE_TTL_MS = 15_000; // 15 seconds
+const WORKSPACE_CACHE_TTL_MS = 4_000; // 4 seconds — keep short so workspace updates appear quickly during generation
 
 function getCachedWorkspaceFiles(sessionId: string): WorkspaceCacheEntry | null {
   const entry = workspaceFileCache.get(sessionId);

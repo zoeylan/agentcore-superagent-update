@@ -205,6 +205,25 @@ export function useChatRoom(options: UseChatRoomOptions = {}): UseChatRoomReturn
               setMessages(prev => prev.map(m =>
                 m.id === aiMsgId ? { ...m, agent_id: parsed.targetAgentId } : m
               ));
+            } else if (parsed.type === 'leader_evaluating') {
+              // Leader is evaluating the message
+              setMessages(prev => prev.map(m =>
+                m.id === aiMsgId ? { ...m, content: `👑 ${parsed.leaderName} 正在评估...`, agent_id: parsed.leaderId } : m
+              ));
+            } else if (parsed.type === 'leader_decision') {
+              // Leader made a decision
+              const actionLabel = parsed.action === 'self' ? '自己回答'
+                : parsed.action === 'delegate' ? '委派给其他 Agent'
+                : parsed.action === 'collaborate' ? '多 Agent 协作'
+                : '无需回应';
+              setMessages(prev => prev.map(m =>
+                m.id === aiMsgId ? { ...m, content: `👑 Leader 决策: ${actionLabel}\n${parsed.reasoning}` } : m
+              ));
+            } else if (parsed.type === 'agent_finding') {
+              // An agent completed its sub-task (async progress)
+              setMessages(prev => prev.map(m =>
+                m.id === aiMsgId ? { ...m, content: (m.content ? m.content + '\n' : '') + `✅ ${parsed.agentName} 完成 (${parsed.durationMs}ms)` } : m
+              ));
             } else if (parsed.type === 'swarm_started') {
               // Multi-agent collaboration started — update placeholder
               setMessages(prev => prev.map(m =>

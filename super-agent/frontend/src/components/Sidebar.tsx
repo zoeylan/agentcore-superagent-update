@@ -25,10 +25,16 @@ interface NavItemConfig {
 
 const navItems: NavItemConfig[] = [
   {
+    id: 'starred',
+    icon: <Star className="w-5 h-5" />,
+    tooltipKey: 'nav.starred',
+    path: '/showcase',
+  },
+  {
     id: 'dashboard',
     icon: <LayoutDashboard className="w-5 h-5" />,
     tooltipKey: 'nav.dashboard',
-    path: '/',
+    path: '/dashboard',
   },
   {
     id: 'chat',
@@ -84,12 +90,6 @@ const navItems: NavItemConfig[] = [
     tooltipKey: 'nav.support',
     path: '/support',
   },
-  {
-    id: 'starred',
-    icon: <Star className="w-5 h-5" />,
-    tooltipKey: 'nav.starred',
-    path: '/showcase',
-  },
 ]
 
 interface SidebarProps {
@@ -105,7 +105,7 @@ export function Sidebar({ onAvatarClick, isAdminMenuOpen }: SidebarProps) {
 
   const getActivePage = (): NavigationPage => {
     const path = location.pathname
-    if (path === '/') return 'dashboard'
+    if (path === '/dashboard') return 'dashboard'
     if (path.startsWith('/chat')) return 'chat'
     if (path.startsWith('/workflow')) return 'workflow'
     if (path.startsWith('/approvals')) return 'approvals'

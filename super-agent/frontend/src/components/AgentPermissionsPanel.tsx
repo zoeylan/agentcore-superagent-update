@@ -183,7 +183,7 @@ export function AgentPermissionsPanel({
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-gray-300">
-            {isDigitalTwin ? '委托管理员' : '授权用户'}
+            授权用户
           </h3>
           <button
             onClick={() => setShowAddUser(true)}
@@ -219,7 +219,7 @@ export function AgentPermissionsPanel({
                 onChange={(e) => setSelectedPermission(e.target.value as any)}
                 className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-white"
               >
-                <option value="admin">{isDigitalTwin ? '委托管理 (可编辑)' : '管理员 (可编辑)'}</option>
+                <option value="admin">管理员 (可编辑)</option>
                 <option value="invoke">可调用</option>
                 <option value="view">可查看</option>
               </select>
@@ -268,7 +268,7 @@ export function AgentPermissionsPanel({
                   onChange={(e) => handleUpdatePermission(perm.id, e.target.value as any)}
                   className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300"
                 >
-                  <option value="admin">{isDigitalTwin ? '委托管理' : '管理员'}</option>
+                  <option value="admin">管理员</option>
                   <option value="invoke">可调用</option>
                   <option value="view">可查看</option>
                 </select>

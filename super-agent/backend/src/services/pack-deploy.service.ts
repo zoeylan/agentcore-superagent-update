@@ -165,15 +165,21 @@ class PackDeployService {
     }
 
     const scopeDir = join(packDir, 'scopes', scopeDirName);
-    if (!existsSync(scopeDir)) {
+    const twinDir = join(packDir, 'digital-twins', scopeDirName);
+    const isDigitalTwin = !existsSync(scopeDir) && existsSync(twinDir);
+    const resolvedDir = isDigitalTwin ? twinDir : scopeDir;
+
+    if (!existsSync(resolvedDir)) {
       throw new Error(`Scope not found: ${scopeDirName} in pack ${packId}`);
     }
 
-    // Read scope.json for metadata
-    const scopeJsonPath = join(scopeDir, 'scope.json');
+    // Read scope.json or twin.json for metadata
+    const metaJsonPath = isDigitalTwin
+      ? join(resolvedDir, 'twin.json')
+      : join(resolvedDir, 'scope.json');
     let scopeMeta: any = {};
-    if (existsSync(scopeJsonPath)) {
-      scopeMeta = JSON.parse(await readFile(scopeJsonPath, 'utf-8'));
+    if (existsSync(metaJsonPath)) {
+      scopeMeta = JSON.parse(await readFile(metaJsonPath, 'utf-8'));
     }
 
     // Read manifest for industry info
@@ -213,7 +219,7 @@ class PackDeployService {
         workflowId = existingWorkflow.id;
       } else {
         // Backfill: create workflow if workflow-plan.json exists but wasn't imported
-        const workflowPath = join(scopeDir, 'workflow', 'workflow-plan.json');
+        const workflowPath = join(resolvedDir, 'workflow', 'workflow-plan.json');
         if (existsSync(workflowPath)) {
           try {
             const workflowPlan = JSON.parse(await readFile(workflowPath, 'utf-8'));
@@ -288,7 +294,12 @@ class PackDeployService {
         description: scopeMeta.description || `Deployed from industry pack: ${packId}/${scopeDirName}`,
         icon: scopeMeta.icon || industryIcon,
         color: scopeMeta.color || industryColor,
-        scope_type: 'business',
+        scope_type: isDigitalTwin ? 'digital_twin' : 'business',
+        ...(isDigitalTwin && {
+          role: scopeMeta.role || null,
+          system_prompt: scopeMeta.system_prompt || null,
+          avatar: (scopeMeta.name || scopeDirName).charAt(0),
+        }),
         settings: {
           source: 'industry-pack',
           pack_id: packId,
@@ -298,6 +309,19 @@ class PackDeployService {
         },
       },
     });
+
+    // For digital twins, no agents/skills/workflow needed — return early
+    if (isDigitalTwin) {
+      return {
+        scopeId: scope.id,
+        scopeName: scope.name,
+        agentCount: 0,
+        skillCount: 0,
+        memoryCount: 0,
+        hasSop: false,
+        hasWorkflow: false,
+      };
+    }
 
     // ====================================================================
     // 2. Create agents

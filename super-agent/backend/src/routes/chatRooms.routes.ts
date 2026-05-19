@@ -169,6 +169,43 @@ export async function chatRoomRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  /**
+   * PUT /api/chat/rooms/:roomId/members/:agentId/leader — Set agent as room leader
+   */
+  fastify.put<{ Params: { roomId: string; agentId: string }; Body: { is_leader: boolean; leader_instructions?: string } }>(
+    '/:roomId/members/:agentId/leader',
+    { preHandler: [authenticate, requireModifyAccess] },
+    async (request, reply) => {
+      const { chatRoomMemberRepository: memberRepo } = await import('../repositories/chat-room-member.repository.js');
+      const { prisma } = await import('../config/database.js');
+      const roomId = request.params.roomId;
+      const agentId = request.params.agentId;
+      const { is_leader, leader_instructions } = request.body;
+
+      if (is_leader) {
+        // Demote current leader
+        await prisma.chat_room_members.updateMany({
+          where: { session_id: roomId, is_leader: true },
+          data: { is_leader: false, role: 'member', leader_instructions: null },
+        });
+        // Promote new leader
+        await prisma.chat_room_members.updateMany({
+          where: { session_id: roomId, agent_id: agentId },
+          data: { is_leader: true, role: 'leader', leader_instructions: leader_instructions ?? null },
+        });
+      } else {
+        // Demote this agent
+        await prisma.chat_room_members.updateMany({
+          where: { session_id: roomId, agent_id: agentId },
+          data: { is_leader: false, role: 'member', leader_instructions: null },
+        });
+      }
+
+      const members = await memberRepo.findBySession(roomId);
+      return reply.send({ members });
+    }
+  );
+
   // ==========================================================================
   // Group Chat Messaging
   // ==========================================================================
@@ -212,9 +249,9 @@ export async function chatRoomRoutes(fastify: FastifyInstance): Promise<void> {
         metadata: {},
       }, orgId);
 
-      // ── All group chat messages go through A2A Orchestrator ─────────
-      // @mention: Orchestrator routes directly to mentioned agent (skip LLM routing)
-      // No @mention: Orchestrator decides single/multi via LLM
+      // ── Routing: Leader mode or A2A Orchestrator ─────────────────────
+      // If room has a leader agent, leader evaluates first.
+      // Otherwise, A2A Orchestrator decides routing via LLM.
       {
         reply.raw.writeHead(200, {
           'Content-Type': 'text/event-stream',
@@ -226,6 +263,7 @@ export async function chatRoomRoutes(fastify: FastifyInstance): Promise<void> {
         try {
           const { a2aOrchestrator } = await import('../services/a2a-orchestrator.service.js');
           const { chatRoomMemberRepository: memberRepo } = await import('../repositories/chat-room-member.repository.js');
+          const { roomLeaderService } = await import('../services/room-leader.service.js');
           const members = await memberRepo.findBySession(roomId);
 
           // Ensure the room session has a workspace (for file output)
@@ -254,7 +292,114 @@ export async function chatRoomRoutes(fastify: FastifyInstance): Promise<void> {
               endpoint: `local://${m.agent_id}`,
             }));
 
-          // Send swarm:started event
+          // ── Check for Leader mode ──────────────────────────────────────
+          const leader = members.find(m => m.is_leader && m.is_active);
+          let mentionOverride = mention_agent_id;
+
+          if (leader && !mention_agent_id) {
+            // Leader evaluates the message
+            reply.raw.write(formatSSEEvent({
+              data: JSON.stringify({
+                type: 'leader_evaluating',
+                leaderId: leader.agent_id,
+                leaderName: leader.agent.display_name,
+              }),
+            }));
+
+            const recentMessages = await chatMessageRepository.findBySession(orgId, roomId, { limit: 10 });
+            const decision = await roomLeaderService.evaluate({
+              message: content,
+              leader,
+              members,
+              recentMessages: recentMessages.reverse(),
+            });
+
+            // Send leader decision event
+            reply.raw.write(formatSSEEvent({
+              data: JSON.stringify({
+                type: 'leader_decision',
+                action: decision.action,
+                reasoning: decision.reasoning,
+                delegateToAgentId: decision.delegateToAgentId,
+              }),
+            }));
+
+            if (decision.action === 'silent') {
+              // No response needed
+              reply.raw.write(formatSSEEvent({ data: '[DONE]' }));
+              reply.raw.end();
+              return;
+            }
+
+            if (decision.action === 'self') {
+              // Leader answers directly — treat as @mention to leader
+              mentionOverride = leader.agent_id;
+            } else if (decision.action === 'delegate' && decision.delegateToAgentId) {
+              // Delegate to specific agent
+              mentionOverride = decision.delegateToAgentId;
+            }
+            // 'collaborate' falls through to orchestrator with tasks
+            if (decision.action === 'collaborate' && decision.tasks?.length) {
+              // Pass tasks to orchestrator
+              const result = await a2aOrchestrator.orchestrate({
+                roomId,
+                organizationId: orgId,
+                userId: request.user!.id,
+                message: content,
+                agents,
+                config: { strategy: 'parallel' },
+              });
+
+              // Stream findings as they come
+              for (const finding of result.findings) {
+                reply.raw.write(formatSSEEvent({
+                  data: JSON.stringify({
+                    type: 'agent_finding',
+                    agentId: finding.agentId,
+                    agentName: finding.agentName,
+                    round: finding.round,
+                    status: finding.status,
+                    durationMs: finding.durationMs,
+                  }),
+                }));
+              }
+
+              // Send route info
+              reply.raw.write(formatSSEEvent({
+                data: JSON.stringify({
+                  type: 'route',
+                  targetAgentId: leader.agent_id,
+                  targetAgentName: leader.agent.display_name,
+                  confidence: 1.0,
+                  reasoning: `Leader coordinated multi-agent collaboration (${result.agentsInvolved.length} agents)`,
+                  routedBy: 'leader',
+                }),
+              }));
+
+              // Send synthesis
+              reply.raw.write(formatSSEEvent({
+                data: JSON.stringify({
+                  type: 'assistant',
+                  content: [{ type: 'text', text: result.finalReport }],
+                }),
+              }));
+
+              reply.raw.write(formatSSEEvent({
+                data: JSON.stringify({
+                  type: 'swarm_completed',
+                  rounds: result.rounds,
+                  agentsInvolved: result.agentsInvolved,
+                  durationMs: result.totalDurationMs,
+                }),
+              }));
+
+              reply.raw.write(formatSSEEvent({ data: '[DONE]' }));
+              reply.raw.end();
+              return;
+            }
+          }
+
+          // ── Standard orchestration (single/multi decided by orchestrator) ──
           reply.raw.write(formatSSEEvent({
             data: JSON.stringify({
               type: 'swarm_started',
@@ -268,10 +413,26 @@ export async function chatRoomRoutes(fastify: FastifyInstance): Promise<void> {
             userId: request.user!.id,
             message: content,
             agents,
-            mentionAgentId: mention_agent_id,
+            mentionAgentId: mentionOverride,
           });
 
-          // Send route info so frontend can attribute the response
+          // Send per-agent findings for transparency
+          if (result.mode === 'multi') {
+            for (const finding of result.findings) {
+              reply.raw.write(formatSSEEvent({
+                data: JSON.stringify({
+                  type: 'agent_finding',
+                  agentId: finding.agentId,
+                  agentName: finding.agentName,
+                  round: finding.round,
+                  status: finding.status,
+                  durationMs: finding.durationMs,
+                }),
+              }));
+            }
+          }
+
+          // Send route info
           const primaryAgent = agents.find(a => result.agentsInvolved.includes(a.agentId)) ?? agents[0];
           if (primaryAgent) {
             reply.raw.write(formatSSEEvent({
@@ -280,13 +441,15 @@ export async function chatRoomRoutes(fastify: FastifyInstance): Promise<void> {
                 targetAgentId: primaryAgent.agentId,
                 targetAgentName: primaryAgent.displayName,
                 confidence: 1.0,
-                reasoning: result.mode === 'single' ? `Routed to ${primaryAgent.displayName}` : `Multi-agent collaboration (${result.agentsInvolved.length} agents)`,
-                routedBy: 'auto',
+                reasoning: result.mode === 'single'
+                  ? `Routed to ${primaryAgent.displayName}`
+                  : `Multi-agent collaboration (${result.agentsInvolved.length} agents)`,
+                routedBy: leader ? 'leader' : 'auto',
               }),
             }));
           }
 
-          // Send the final synthesis as an assistant message
+          // Send the final synthesis
           reply.raw.write(formatSSEEvent({
             data: JSON.stringify({
               type: 'assistant',

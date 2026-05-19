@@ -3634,6 +3634,10 @@ export const translations: TranslationData = {
   },
 
   // Scope Profile
+  'scopeProfile.startChat': {
+    en: 'Start Chat',
+    cn: '开始聊天'
+  },
   'scopeProfile.healthCheck': {
     en: 'Business Health Check',
     cn: '业务健康检查'
@@ -3703,8 +3707,12 @@ export const translations: TranslationData = {
     cn: '暂无任务历史'
   },
   'scopeProfile.addAgent': {
-    en: 'Add Agent',
-    cn: '添加智能体'
+    en: 'Add Existing',
+    cn: '添加已有'
+  },
+  'scopeProfile.createAgent': {
+    en: 'New Agent',
+    cn: '新建智能体'
   },
   'scopeProfile.noAgents': {
     en: 'No agents',
@@ -4574,7 +4582,7 @@ export const translations: TranslationData = {
   // ============================================================================
   'scopeProfile.a2aTitle': { en: 'External Access (A2A)', cn: '外部访问 (A2A)' },
   'scopeProfile.a2aDescription': { en: 'Allow external systems to discover and invoke agents in this scope via the A2A protocol.', cn: '允许外部系统通过 A2A 协议发现和调用此范围内的智能体。' },
-  'scopeProfile.a2aHint': { en: 'Enabled agents are registered to AWS AgentCore Registry. External systems can discover them via semantic search and invoke through A2A protocol.', cn: '已启用的智能体会注册到 AWS AgentCore Registry。外部系统可通过语义搜索发现并通过 A2A 协议调用。' },
+  'scopeProfile.a2aHint': { en: 'Enabled agents can be discovered and invoked by external systems via the A2A protocol.', cn: '已启用的智能体可被外部系统通过 A2A 协议发现和调用。' },
 
   // ============================================================================
   // Customer Service Section (Scope Detail)
@@ -4622,7 +4630,7 @@ export const translations: TranslationData = {
   // Scope Permissions
   'scopeProfile.accessControl': { en: 'Access Control', cn: '访问控制' },
   'scopeProfile.accessControlHint': { en: 'Manage who can access this scope and their roles', cn: '管理谁可以访问此业务域及其角色' },
-  'scopeProfile.delegateManagement': { en: 'Delegate Management', cn: '委托管理' },
+  'scopeProfile.delegateManagement': { en: 'Permission Management', cn: '权限管理' },
   'scopeProfile.delegateHint': { en: 'Manage who can edit and maintain this digital twin', cn: '管理谁可以编辑和维护此数字分身' },
   'scopeProfile.visibility': { en: 'Visibility', cn: '可见性' },
   'scopeProfile.visibilityOpen': { en: 'Open', cn: '开放' },

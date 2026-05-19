@@ -238,6 +238,7 @@ model agents {
   scope_briefings   scope_briefings[]
   scope_assignments agent_scope_assignments[]
   room_memberships  chat_room_members[]
+  project_agents    project_agents[]
   permissions       agent_permissions[]
 
   @@unique([organization_id, business_scope_id, name], name: "unique_agent_name_per_scope")
@@ -1195,14 +1196,16 @@ model scope_document_groups {
 // Chat Room Members — agents participating in a chat room (group mode)
 // ============================================================================
 model chat_room_members {
-  id              String   @id @default(uuid()) @db.Uuid
-  session_id      String   @db.Uuid
-  agent_id        String   @db.Uuid
-  role            String   @default("member") @db.VarChar(20) // primary | member
-  is_active       Boolean  @default(true)
-  added_by        String?  @db.Uuid
-  source_scope_id String?  @db.Uuid // scope the agent belongs to (for cross-scope rooms)
-  joined_at       DateTime @default(now()) @db.Timestamptz
+  id                  String   @id @default(uuid()) @db.Uuid
+  session_id          String   @db.Uuid
+  agent_id            String   @db.Uuid
+  role                String   @default("member") @db.VarChar(20) // leader | member
+  is_active           Boolean  @default(true)
+  is_leader           Boolean  @default(false)
+  leader_instructions String?  // coordination strategy (only for leader)
+  added_by            String?  @db.Uuid
+  source_scope_id     String?  @db.Uuid // scope the agent belongs to (for cross-scope rooms)
+  joined_at           DateTime @default(now()) @db.Timestamptz
 
   session chat_sessions  @relation(fields: [session_id], references: [id], onDelete: Cascade)
   agent   agents         @relation(fields: [agent_id], references: [id], onDelete: Cascade)
@@ -1244,21 +1247,46 @@ model projects {
   repo_url             String?
   default_branch       String   @default("main")
   business_scope_id    String?  @db.Uuid
-  agent_id             String?  @db.Uuid // the agent in charge of this project
+  agent_id             String?  @db.Uuid // the agent in charge of this project (legacy, prefer project_agents)
   workspace_session_id String?  @db.Uuid // persistent chat session for the project agent
   settings             Json     @default("{}")
   created_by           String   @db.Uuid
   created_at           DateTime @default(now()) @db.Timestamptz
   updated_at           DateTime @default(now()) @updatedAt @db.Timestamptz
 
-  organization organizations     @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  issues       project_issues[]
-  members      project_members[]
+  organization   organizations      @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  issues         project_issues[]
+  members        project_members[]
+  project_agents project_agents[]
 
   @@index([organization_id])
   @@index([created_by])
   @@index([agent_id])
   @@index([created_at(sort: Desc)])
+}
+
+// ============================================================================
+// Project Agents — multi-agent squad for a project
+// Each project can have multiple agents with different roles.
+// One agent can be designated as leader (coordinates work, reviews, assigns).
+// ============================================================================
+model project_agents {
+  id                 String   @id @default(uuid()) @db.Uuid
+  project_id         String   @db.Uuid
+  agent_id           String   @db.Uuid
+  role               String   @default("worker") @db.VarChar(30) // leader | frontend | backend | qa | devops | worker
+  is_leader          Boolean  @default(false)
+  auto_assign_labels String[] @default([]) // labels that auto-assign issues to this agent
+  instructions       String?  // agent-specific instructions for this project
+  created_at         DateTime @default(now()) @db.Timestamptz
+
+  project projects @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  agent   agents   @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+
+  @@unique([project_id, agent_id], name: "unique_project_agent")
+  @@index([project_id])
+  @@index([agent_id])
+  @@index([project_id, is_leader])
 }
 
 // ============================================================================
@@ -1297,6 +1325,7 @@ model project_issues {
   pr_url               String?
   estimated_effort     String?
   parent_issue_id      String?  @db.Uuid
+  assigned_agent_id    String?  @db.Uuid // agent assigned to this issue (from project_agents)
   created_by           String   @db.Uuid
   created_at           DateTime @default(now()) @db.Timestamptz
   updated_at           DateTime @default(now()) @updatedAt @db.Timestamptz

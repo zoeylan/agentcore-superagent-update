@@ -666,6 +666,17 @@ export function ScopeProfile({ scope, agents, allAgents = [], onDeleteScope, onA
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
               <h2 className="text-lg font-bold text-white truncate">{scope.name}</h2>
+              <button
+                onClick={() => {
+                  localStorage.removeItem('super-agent-chat-backend-session')
+                  localStorage.removeItem('super-agent-chat-scope')
+                  navigate(`/chat?scope=${scope.id}&t=${Date.now()}`)
+                }}
+                className="flex items-center gap-1.5 text-[10px] font-semibold px-2.5 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+              >
+                <MessageSquare className="w-3 h-3" />
+                {t('scopeProfile.startChat')}
+              </button>
               <div className="relative">
                 <button
                   className="text-[10px] font-semibold px-2.5 py-1 rounded-full border border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors cursor-pointer"
@@ -873,6 +884,13 @@ export function ScopeProfile({ scope, agents, allAgents = [], onDeleteScope, onA
               <h3 className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Agents</h3>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate(`/agents/config/new?scope=${scope.id}`)}
+                className="flex items-center gap-1 px-2 py-1 text-[10px] bg-purple-600 hover:bg-purple-700 rounded text-white transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+                {t('scopeProfile.createAgent')}
+              </button>
               {onAddAgent && (
                 <button
                   onClick={() => setShowAgentPicker(!showAgentPicker)}
@@ -1100,10 +1118,7 @@ export function ScopeProfile({ scope, agents, allAgents = [], onDeleteScope, onA
           <ScopeKnowledgePanel scopeId={scope.id} />
         </div>
 
-        {/* Legacy Document Groups (kept for backward compatibility) */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden p-4">
-          <DocGroupsPanel scopeId={scope.id} scopeName={scope.name} />
-        </div>
+        {/* Legacy Document Groups — hidden; replaced by ScopeKnowledgePanel above */}
 
         {/* ============================================================ */}
         {/*  IM Channels                                                  */}

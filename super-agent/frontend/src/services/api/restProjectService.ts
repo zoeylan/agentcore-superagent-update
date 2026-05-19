@@ -44,6 +44,7 @@ export interface ProjectIssue {
   pr_url: string | null;
   estimated_effort: string | null;
   parent_issue_id: string | null;
+  assigned_agent_id: string | null;
   workspace_session_id: string | null;
   // AI governance fields
   readiness_score: number | null;
@@ -86,6 +87,26 @@ export interface IssueComment {
   created_at: string;
 }
 
+export interface ProjectAgent {
+  id: string;
+  project_id: string;
+  agent_id: string;
+  role: string;
+  is_leader: boolean;
+  auto_assign_labels: string[];
+  instructions: string | null;
+  created_at: string;
+  agent: {
+    id: string;
+    name: string;
+    display_name: string;
+    role: string | null;
+    avatar: string | null;
+    status: string;
+    business_scope_id: string | null;
+  };
+}
+
 export interface IssueRelation {
   id: string;
   project_id: string;
@@ -109,6 +130,20 @@ export interface TriageReport {
   merge_suggestions: Array<{ issue_numbers: number[]; reason: string; suggested_title: string }>;
   missing_info: Array<{ issue_number: number; what_is_missing: string }>;
   risk_flags: Array<{ issue_number: number; risk: string }>;
+  suggested_actions?: TriageAction[];
+}
+
+export interface TriageAction {
+  type: 'merge_issues' | 'reorder' | 'update_description' | 'change_priority' | 'split_issue' | 'custom';
+  label: string;
+  description: string;
+  params: Record<string, unknown>;
+}
+
+export interface ActionResult {
+  success: boolean;
+  message: string;
+  changes: Array<{ issue_number: number; action: string; detail: string }>;
 }
 
 export const RestProjectService = {
@@ -228,12 +263,42 @@ export const RestProjectService = {
   async reviewRelation(projectId: string, relationId: string, action: 'confirmed' | 'dismissed'): Promise<void> {
     await restClient.patch(`/api/projects/${projectId}/relations/${relationId}/review`, { action });
   },
-  async generateTriage(projectId: string): Promise<TriageReport> {
+  async generateTriage(projectId: string): Promise<TriageReport & { suggested_actions?: TriageAction[] }> {
     return restClient.post(`/api/projects/${projectId}/triage`, {});
+  },
+  async executeTriageAction(projectId: string, action: TriageAction): Promise<ActionResult> {
+    return restClient.post(`/api/projects/${projectId}/triage/execute-action`, { action });
+  },
+  async executeCustomInstruction(projectId: string, instruction: string): Promise<ActionResult> {
+    return restClient.post(`/api/projects/${projectId}/triage/execute-custom`, { instruction });
   },
 
   // Code Diff
   async getIssueDiff(projectId: string, issueId: string): Promise<{ diff_stat: DiffStat | null; diff_patch: string | null; diff_created_at: string | null }> {
     return restClient.get(`/api/projects/${projectId}/issues/${issueId}/diff`);
+  },
+
+  // Project Squad (Multi-Agent Team)
+  async listProjectAgents(projectId: string): Promise<ProjectAgent[]> {
+    const res = await restClient.get<{ data: ProjectAgent[] }>(`/api/projects/${projectId}/agents`);
+    return res.data;
+  },
+  async addProjectAgent(projectId: string, input: { agent_id: string; role?: string; is_leader?: boolean; auto_assign_labels?: string[]; instructions?: string }): Promise<ProjectAgent> {
+    return restClient.post<ProjectAgent>(`/api/projects/${projectId}/agents`, input);
+  },
+  async updateProjectAgent(projectId: string, agentId: string, input: { role?: string; is_leader?: boolean; auto_assign_labels?: string[]; instructions?: string }): Promise<ProjectAgent> {
+    return restClient.put<ProjectAgent>(`/api/projects/${projectId}/agents/${agentId}`, input);
+  },
+  async removeProjectAgent(projectId: string, agentId: string): Promise<void> {
+    await restClient.delete(`/api/projects/${projectId}/agents/${agentId}`);
+  },
+  async autoAssignIssue(projectId: string, issueId: string): Promise<{ assigned_agent_id: string | null }> {
+    return restClient.post(`/api/projects/${projectId}/issues/${issueId}/assign`, {});
+  },
+  async importScopeAgents(projectId: string): Promise<{ imported: number; skipped: number }> {
+    return restClient.post(`/api/projects/${projectId}/agents/import-from-scope`, {});
+  },
+  async recommendSquad(projectId: string): Promise<{ recommendations: Array<{ agent_id: string; agent_name: string; suggested_role: string; reason: string; auto_assign_labels: string[] }> }> {
+    return restClient.post(`/api/projects/${projectId}/agents/recommend`, {});
   },
 };

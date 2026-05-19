@@ -5,10 +5,14 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Plus, LayoutGrid, List, Loader2, GripVertical, Bot, User, MessageSquare, Settings, Play, X, Sparkles, Terminal, ChevronDown, ChevronUp, Send, RefreshCw, FileCode } from 'lucide-react'
-import { RestProjectService, type Project, type ProjectIssue, type IssueComment, type IssueRelation, type TriageReport } from '@/services/api/restProjectService'
+import { ArrowLeft, Plus, LayoutGrid, List, Loader2, GripVertical, Bot, User, MessageSquare, Settings, Play, X, Sparkles, Terminal, ChevronDown, ChevronUp, Send, RefreshCw, FileCode, Crown, Trash2, Tag, PanelRightClose, PanelRightOpen } from 'lucide-react'
+import { RestProjectService, type Project, type ProjectIssue, type IssueComment, type IssueRelation, type TriageReport, type ProjectAgent, type TriageAction, type ActionResult } from '@/services/api/restProjectService'
 import { useTranslation } from '@/i18n'
 import { WorkspaceExplorer } from '@/components'
+import { ArtifactListPanel } from '@/components/chat'
+import { WorkspaceActions } from '@/components/WorkspaceActions'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 const LANES = [
   { id: 'backlog', labelKey: 'project.backlog', color: 'border-gray-600' },
@@ -99,6 +103,48 @@ export function ProjectBoard() {
   const [consoleMessages, setConsoleMessages] = useState<Array<{ id: string; type: string; content: string; created_at: string }>>([])
   const consoleEndRef = useRef<HTMLDivElement>(null)
 
+  // Tab system (like Chat module): Board is default, file tabs can be opened
+  interface FileTab { id: string; name: string; path: string }
+  const [fileTabs, setFileTabs] = useState<FileTab[]>([])
+  const [activeTab, setActiveTab] = useState<string>('board') // 'board' | 'file:{path}'
+  const [fileContents, setFileContents] = useState<Record<string, { content: string | null; loading: boolean }>>({})
+
+  // Right panel mode
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false)
+  const [rightPanelTab, setRightPanelTab] = useState<'workspace' | 'artifacts'>('workspace')
+
+  const handleFileOpen = useCallback(async (path: string, name: string) => {
+    const tabId = `file:${path}`
+    setFileTabs(prev => {
+      if (prev.find(t => t.id === tabId)) return prev
+      return [...prev, { id: tabId, name, path }]
+    })
+    setActiveTab(tabId)
+
+    // Load file content if not cached
+    setFileContents(prev => {
+      if (prev[tabId]?.content !== undefined) return prev
+      return { ...prev, [tabId]: { content: null, loading: true } }
+    })
+
+    try {
+      const sid = project?.workspace_session_id
+      if (!sid) return
+      const { restClient } = await import('@/services/api/restClient')
+      const res = await restClient.get<{ content: string }>(`/api/chat/sessions/${sid}/workspace/file?path=${encodeURIComponent(path)}`)
+      setFileContents(prev => ({ ...prev, [tabId]: { content: res.content ?? '', loading: false } }))
+    } catch (err) {
+      setFileContents(prev => ({ ...prev, [tabId]: { content: `// Failed to load: ${err instanceof Error ? err.message : 'Error'}`, loading: false } }))
+    }
+  }, [project?.workspace_session_id])
+
+  const handleCloseFileTab = useCallback((tabId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setFileTabs(prev => prev.filter(t => t.id !== tabId))
+    if (activeTab === tabId) setActiveTab('board')
+    setFileContents(prev => { const next = { ...prev }; delete next[tabId]; return next })
+  }, [activeTab])
+
   const loadData = useCallback(async () => {
     if (!projectId) return
     try {
@@ -138,6 +184,20 @@ export function ProjectBoard() {
   }, [projectId])
 
   useEffect(() => { loadData() }, [loadData])
+
+  // Listen for preview-ready events from WorkspaceActions to open preview in new browser tab
+  useEffect(() => {
+    const onPreviewReady = (e: Event) => {
+      const { url } = (e as CustomEvent).detail
+      if (url) {
+        const token = localStorage.getItem('local_auth_token') || localStorage.getItem('cognito_id_token')
+        const fullUrl = token ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : url
+        window.open(fullUrl, '_blank')
+      }
+    }
+    window.addEventListener('preview-ready', onPreviewReady)
+    return () => window.removeEventListener('preview-ready', onPreviewReady)
+  }, [])
 
   // Poll agent console messages when panel is open
   useEffect(() => {
@@ -201,6 +261,9 @@ export function ProjectBoard() {
     setNewIssueTitle('')
     setShowCreateIssue(false)
     loadData()
+    // AI enrichment runs async (~3-5s). Refresh again to pick up analysis results.
+    setTimeout(() => loadData(), 5000)
+    setTimeout(() => loadData(), 10000)
   }
 
   const handleDrop = async (issueId: string, newStatus: string) => {
@@ -405,6 +468,99 @@ export function ProjectBoard() {
     return projectRelations.filter(r => r.source_issue_id === issueId || r.target_issue_id === issueId)
   }
 
+  const renderRightPanel = () => {
+    if (rightPanelCollapsed) {
+      return (
+        <button
+          onClick={() => setRightPanelCollapsed(false)}
+          className="border-l border-gray-800 px-1.5 pt-2 text-gray-500 hover:text-white hover:bg-gray-800 transition-colors flex-shrink-0 h-full"
+          title="展开面板"
+        >
+          <PanelRightOpen className="w-4 h-4" />
+        </button>
+      )
+    }
+    return (
+      <div className="border-l border-gray-800 bg-gray-900 flex flex-col flex-shrink-0" style={{ width: wsPanelWidth }}>
+        <div className="flex border-b border-gray-800 flex-shrink-0">
+          <button
+            onClick={() => setRightPanelTab('artifacts')}
+            className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+              rightPanelTab === 'artifacts' ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50' : 'text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            📋 产出物
+          </button>
+          <button
+            onClick={() => setRightPanelTab('workspace')}
+            className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+              rightPanelTab === 'workspace' ? 'text-blue-400 border-b-2 border-blue-400 bg-gray-800/50' : 'text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            📁 文件管理
+          </button>
+          <button
+            onClick={() => setRightPanelCollapsed(true)}
+            className="px-2 py-2 text-gray-500 hover:text-white hover:bg-gray-800 transition-colors"
+            title="收起面板"
+          >
+            <PanelRightClose className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          {rightPanelTab === 'artifacts' ? (
+            <ArtifactListPanel
+              sessionId={project?.workspace_session_id ?? null}
+              isGenerating={false}
+              onFileOpen={handleFileOpen}
+              onPreviewApp={async (folder) => {
+                if (!project?.workspace_session_id) return
+                try {
+                  const { restClient } = await import('@/services/api/restClient')
+                  const res = await restClient.post<{ id: string; name: string; access_url: string }>('/api/apps/publish-from-workspace', {
+                    session_id: project.workspace_session_id,
+                    folder_path: folder,
+                    name: 'preview',
+                    status: 'preview',
+                  })
+                  window.dispatchEvent(new CustomEvent('preview-ready', {
+                    detail: { url: res.access_url, name: res.name, appId: res.id },
+                  }))
+                } catch (err) {
+                  console.error('[ProjectBoard] Preview failed:', err)
+                }
+              }}
+              onPublishApp={async (folder) => {
+                if (!project?.workspace_session_id) return
+                try {
+                  const { restClient } = await import('@/services/api/restClient')
+                  await restClient.post<{ id: string; name: string; access_url: string }>('/api/apps/publish-from-workspace', {
+                    session_id: project.workspace_session_id,
+                    folder_path: folder,
+                    name: project.name || 'app',
+                    status: 'published',
+                  })
+                } catch (err) {
+                  console.error('[ProjectBoard] Publish failed:', err)
+                }
+              }}
+              refreshKey={wsRefreshKey}
+            />
+          ) : (
+            <WorkspaceExplorer
+              sessionId={project?.workspace_session_id ?? null}
+              businessScopeId={project?.business_scope_id}
+              refreshKey={wsRefreshKey}
+              width={wsPanelWidth}
+              onWidthChange={setWsPanelWidth}
+              onFileOpen={handleFileOpen}
+            />
+          )}
+        </div>
+      </div>
+    )
+  }
+
   if (isLoading) {
     return <div className="flex items-center justify-center h-full"><Loader2 className="w-8 h-8 text-blue-500 animate-spin" /></div>
   }
@@ -480,10 +636,50 @@ export function ProjectBoard() {
         </div>
       </div>
 
-      {/* Board View */}
-      {viewMode === 'board' ? (
-        <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 flex overflow-x-auto p-4 gap-3">
+      {/* Main area: Left (tabs + content) | Right (panel) */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left side: Tab bar + Content */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Tab Bar — only visible when file tabs are open */}
+          {fileTabs.length > 0 && (
+            <div className="flex items-center gap-0.5 px-4 py-1 border-b border-gray-800 bg-gray-900/80 overflow-x-auto flex-shrink-0">
+              <button
+                onClick={() => setActiveTab('board')}
+                className={`px-3 py-1.5 text-xs rounded-t-md transition-colors flex-shrink-0 ${
+                  activeTab === 'board'
+                    ? 'bg-gray-800 text-white border-b-2 border-blue-500'
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800/50'
+                }`}
+              >
+                📋 Board
+              </button>
+              {fileTabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-t-md transition-colors flex-shrink-0 group ${
+                    activeTab === tab.id
+                      ? 'bg-gray-800 text-white border-b-2 border-blue-500'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-800/50'
+                  }`}
+                >
+                  <span className="truncate max-w-[120px]">{tab.name}</span>
+                  <span
+                    onClick={(e) => handleCloseFileTab(tab.id, e)}
+                    className="ml-1 p-0.5 rounded hover:bg-gray-600 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={10} />
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Content area */}
+          {activeTab === 'board' ? (
+            <>
+              {viewMode === 'board' ? (
+                <div className="flex-1 flex overflow-x-auto p-4 gap-3">
           {LANES.map(lane => {
             const laneIssues = issues.filter(i => i.status === lane.id).sort((a, b) => a.sort_order - b.sort_order)
             return (
@@ -505,49 +701,83 @@ export function ProjectBoard() {
               </div>
             )
           })}
-        </div>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-auto p-4">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-gray-500 border-b border-gray-800">
+                        <th className="pb-2">#</th><th className="pb-2">{t('project.colTitle')}</th><th className="pb-2">{t('project.colStatus')}</th><th className="pb-2">{t('project.colPriority')}</th><th className="pb-2">{t('project.colCreator')}</th><th className="pb-2">{t('project.colCreated')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {issues.map(issue => (
+                        <tr key={issue.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer" onClick={() => handleOpenIssueWithRelations(issue)}>
+                          <td className="py-2 pl-3 text-gray-500">{issue.issue_number}</td>
+                          <td className="py-2 text-white">{issue.title}</td>
+                          <td className="py-2"><span className={`px-2 py-0.5 rounded text-xs ${issue.status === 'done' ? 'bg-green-600/20 text-green-400' : issue.status === 'in_progress' ? 'bg-yellow-600/20 text-yellow-400' : issue.status === 'in_review' ? 'bg-purple-600/20 text-purple-400' : 'bg-gray-600/20 text-gray-400'}`}>{issue.status.replace('_', ' ')}</span></td>
+                          <td className="py-2">{PRIORITY_BADGES[issue.priority]?.label ?? '🟡'}</td>
+                          <td className="py-2">{issue.created_by_profile?.avatar_url ? <img src={issue.created_by_profile.avatar_url} alt="" className="w-5 h-5 rounded-full object-cover inline" /> : <span className="inline-flex w-5 h-5 rounded-full bg-gray-600 text-[9px] text-gray-300 items-center justify-center">{issue.created_by_profile?.full_name?.charAt(0) ?? '?'}</span>}</td>
+                          <td className="py-2 text-gray-500 text-xs">{new Date(issue.created_at).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          ) : (
+            /* File Viewer Tab */
+            <div className="flex-1 overflow-auto bg-gray-950">
+              {(() => {
+                const fc = fileContents[activeTab]
+                if (!fc || fc.loading) {
+                  return (
+                    <div className="flex items-center justify-center h-full">
+                      <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+                    </div>
+                  )
+                }
+                const currentTab = fileTabs.find(t => t.id === activeTab)
+                const isMarkdown = currentTab?.name.endsWith('.md')
+                if (isMarkdown && fc.content) {
+                  return (
+                    <div className="p-6 prose prose-invert prose-sm max-w-none
+                      [&_h1]:text-xl [&_h1]:font-bold [&_h1]:text-white [&_h1]:mt-4 [&_h1]:mb-2
+                      [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-white [&_h2]:mt-3 [&_h2]:mb-2
+                      [&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-white [&_h3]:mt-2 [&_h3]:mb-1
+                      [&_p]:text-gray-300 [&_p]:leading-relaxed [&_p]:mb-2
+                      [&_ul]:pl-5 [&_ul]:mb-2 [&_ol]:pl-5 [&_ol]:mb-2
+                      [&_li]:text-gray-300 [&_li]:mb-0.5
+                      [&_code]:bg-gray-800 [&_code]:text-green-400 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-xs
+                      [&_pre]:bg-gray-900 [&_pre]:border [&_pre]:border-gray-700 [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-2 [&_pre]:overflow-x-auto
+                      [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-gray-300
+                      [&_strong]:text-white [&_strong]:font-semibold
+                      [&_a]:text-blue-400 [&_a]:underline
+                      [&_blockquote]:border-l-2 [&_blockquote]:border-gray-600 [&_blockquote]:pl-3 [&_blockquote]:text-gray-400
+                      [&_hr]:border-gray-700 [&_hr]:my-3
+                    ">
+                      <Markdown remarkPlugins={[remarkGfm]}>{fc.content}</Markdown>
+                    </div>
+                  )
+                }
+                return (
+                  <pre className="p-4 text-xs text-gray-300 font-mono whitespace-pre-wrap leading-relaxed">{fc.content}</pre>
+                )
+              })()}
+            </div>
+          )}
 
-          {/* Workspace Panel */}
-          <WorkspaceExplorer
+          {/* WorkspaceActions bar — same as Chat page, shows Preview/Publish when app detected */}
+          <WorkspaceActions
             sessionId={project?.workspace_session_id ?? null}
             refreshKey={wsRefreshKey}
-            width={wsPanelWidth}
-            onWidthChange={setWsPanelWidth}
           />
         </div>
-      ) : (
-        <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 overflow-auto p-4">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-gray-500 border-b border-gray-800">
-                <th className="pb-2">#</th><th className="pb-2">{t('project.colTitle')}</th><th className="pb-2">{t('project.colStatus')}</th><th className="pb-2">{t('project.colPriority')}</th><th className="pb-2">{t('project.colCreator')}</th><th className="pb-2">{t('project.colCreated')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {issues.map(issue => (
-                <tr key={issue.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer" onClick={() => handleOpenIssueWithRelations(issue)}>
-                  <td className="py-2 pl-3 text-gray-500">{issue.issue_number}</td>
-                  <td className="py-2 text-white">{issue.title}</td>
-                  <td className="py-2"><span className={`px-2 py-0.5 rounded text-xs ${issue.status === 'done' ? 'bg-green-600/20 text-green-400' : issue.status === 'in_progress' ? 'bg-yellow-600/20 text-yellow-400' : issue.status === 'in_review' ? 'bg-purple-600/20 text-purple-400' : 'bg-gray-600/20 text-gray-400'}`}>{issue.status.replace('_', ' ')}</span></td>
-                  <td className="py-2">{PRIORITY_BADGES[issue.priority]?.label ?? '🟡'}</td>
-                  <td className="py-2">{issue.created_by_profile?.avatar_url ? <img src={issue.created_by_profile.avatar_url} alt="" className="w-5 h-5 rounded-full object-cover inline" /> : <span className="inline-flex w-5 h-5 rounded-full bg-gray-600 text-[9px] text-gray-300 items-center justify-center">{issue.created_by_profile?.full_name?.charAt(0) ?? '?'}</span>}</td>
-                  <td className="py-2 text-gray-500 text-xs">{new Date(issue.created_at).toLocaleDateString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
 
-          {/* Workspace Panel */}
-          <WorkspaceExplorer
-            sessionId={project?.workspace_session_id ?? null}
-            refreshKey={wsRefreshKey}
-            width={wsPanelWidth}
-            onWidthChange={setWsPanelWidth}
-          />
-        </div>
-      )}
+        {/* Right Panel */}
+        {renderRightPanel()}
+      </div>
 
       {/* Agent Console (bottom panel) */}
       {showConsole && (
@@ -799,9 +1029,9 @@ export function ProjectBoard() {
                   <textarea
                     value={editDesc}
                     onChange={e => setEditDesc(e.target.value)}
-                    rows={6}
+                    rows={12}
                     placeholder={t('project.descPlaceholder')}
-                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 outline-none focus:border-blue-500 resize-none"
+                    className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 outline-none focus:border-blue-500 resize-y min-h-[120px]"
                   />
                 )}
               </div>
@@ -1155,89 +1385,12 @@ export function ProjectBoard() {
 
       {/* Triage Report Slide-over */}
       {showTriageReport && triageReport && (
-        <div className="fixed inset-0 bg-black/60 flex justify-end z-50" onClick={() => setShowTriageReport(false)}>
-          <div className="w-[520px] h-full bg-gray-900 border-l border-gray-700 flex flex-col shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-              <div className="flex items-center gap-2">
-                <Sparkles size={16} className="text-purple-400" />
-                <span className="text-sm font-semibold text-white">{t('project.aiTriageReport')}</span>
-              </div>
-              <button onClick={() => setShowTriageReport(false)} className="p-1.5 text-gray-500 hover:text-white rounded transition-colors">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {/* Summary */}
-              <div className="bg-purple-500/5 border border-purple-500/10 rounded-lg p-3">
-                <p className="text-xs text-gray-300 leading-relaxed">{triageReport.summary}</p>
-                <p className="text-[10px] text-gray-500 mt-2">{t('project.sprintCapacity')}: {triageReport.sprint_estimate}</p>
-              </div>
-
-              {/* Recommended Order */}
-              {triageReport.recommended_order?.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-medium text-gray-300 mb-2">{t('project.recommendedOrder')}</h4>
-                  <div className="space-y-1">
-                    {triageReport.recommended_order.map((item, i) => (
-                      <div key={i} className="flex items-start gap-2 p-2 bg-gray-800/50 rounded-lg">
-                        <span className="text-[10px] text-gray-500 font-mono w-4 flex-shrink-0 mt-0.5">{i + 1}.</span>
-                        <div>
-                          <span className="text-xs text-white">#{item.issue_number}</span>
-                          <p className="text-[10px] text-gray-500 mt-0.5">{item.reason}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Merge Suggestions */}
-              {triageReport.merge_suggestions?.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-medium text-gray-300 mb-2">{t('project.mergeSuggestions')}</h4>
-                  {triageReport.merge_suggestions.map((m, i) => (
-                    <div key={i} className="p-2 bg-orange-500/5 border border-orange-500/10 rounded-lg mb-1.5">
-                      <div className="flex items-center gap-1 mb-1">
-                        {m.issue_numbers.map(n => (
-                          <span key={n} className="px-1.5 py-0.5 bg-gray-700 text-[10px] text-white rounded">#{n}</span>
-                        ))}
-                        <span className="text-[10px] text-gray-500">→</span>
-                        <span className="text-[10px] text-orange-300">{m.suggested_title}</span>
-                      </div>
-                      <p className="text-[10px] text-gray-500">{m.reason}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Missing Info */}
-              {triageReport.missing_info?.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-medium text-gray-300 mb-2">{t('project.infoNeeded')}</h4>
-                  {triageReport.missing_info.map((m, i) => (
-                    <div key={i} className="flex items-start gap-2 p-2 bg-yellow-500/5 border border-yellow-500/10 rounded-lg mb-1.5">
-                      <span className="text-xs text-white flex-shrink-0">#{m.issue_number}</span>
-                      <p className="text-[10px] text-yellow-300">{m.what_is_missing}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Risk Flags */}
-              {triageReport.risk_flags?.length > 0 && (
-                <div>
-                  <h4 className="text-xs font-medium text-gray-300 mb-2">{t('project.riskFlags')}</h4>
-                  {triageReport.risk_flags.map((r, i) => (
-                    <div key={i} className="flex items-start gap-2 p-2 bg-red-500/5 border border-red-500/10 rounded-lg mb-1.5">
-                      <span className="text-xs text-white flex-shrink-0">#{r.issue_number}</span>
-                      <p className="text-[10px] text-red-300">{r.risk}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <TriageReportPanel
+          projectId={projectId!}
+          report={triageReport}
+          onClose={() => setShowTriageReport(false)}
+          onDataChanged={loadData}
+        />
       )}
 
       {/* Settings Modal */}
@@ -1255,6 +1408,214 @@ export function ProjectBoard() {
 }
 
 // ============================================================================
+// Triage Report Panel — with action buttons
+// ============================================================================
+
+function TriageReportPanel({ projectId, report, onClose, onDataChanged }: {
+  projectId: string
+  report: TriageReport
+  onClose: () => void
+  onDataChanged: () => void
+}) {
+  const { t } = useTranslation()
+  const [customInstruction, setCustomInstruction] = useState('')
+  const [executing, setExecuting] = useState<string | null>(null) // action label being executed
+  const [executionResult, setExecutionResult] = useState<ActionResult | null>(null)
+
+  const suggestedActions = report.suggested_actions ?? []
+
+  const handleExecuteAction = async (action: TriageAction) => {
+    setExecuting(action.label)
+    setExecutionResult(null)
+    try {
+      const result = await RestProjectService.executeTriageAction(projectId, action)
+      setExecutionResult(result)
+      if (result.success) onDataChanged()
+    } catch (err) {
+      setExecutionResult({ success: false, message: err instanceof Error ? err.message : '执行失败', changes: [] })
+    } finally {
+      setExecuting(null)
+    }
+  }
+
+  const handleCustomExecute = async () => {
+    if (!customInstruction.trim()) return
+    setExecuting('custom')
+    setExecutionResult(null)
+    try {
+      const result = await RestProjectService.executeCustomInstruction(projectId, customInstruction)
+      setExecutionResult(result)
+      if (result.success) {
+        setCustomInstruction('')
+        onDataChanged()
+      }
+    } catch (err) {
+      setExecutionResult({ success: false, message: err instanceof Error ? err.message : '执行失败', changes: [] })
+    } finally {
+      setExecuting(null)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex justify-end z-50" onClick={onClose}>
+      <div className="w-[520px] h-full bg-gray-900 border-l border-gray-700 flex flex-col shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+          <div className="flex items-center gap-2">
+            <Sparkles size={16} className="text-purple-400" />
+            <span className="text-sm font-semibold text-white">{t('project.aiTriageReport')}</span>
+          </div>
+          <button onClick={onClose} className="p-1.5 text-gray-500 hover:text-white rounded transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Report Content */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Summary */}
+          <div className="bg-purple-500/5 border border-purple-500/10 rounded-lg p-3">
+            <p className="text-xs text-gray-300 leading-relaxed">{report.summary}</p>
+            <p className="text-[10px] text-gray-500 mt-2">{t('project.sprintCapacity')}: {report.sprint_estimate}</p>
+          </div>
+
+          {/* Recommended Order */}
+          {report.recommended_order?.length > 0 && (
+            <div>
+              <h4 className="text-xs font-medium text-gray-300 mb-2">{t('project.recommendedOrder')}</h4>
+              <div className="space-y-1">
+                {report.recommended_order.map((item, i) => (
+                  <div key={i} className="flex items-start gap-2 p-2 bg-gray-800/50 rounded-lg">
+                    <span className="text-[10px] text-gray-500 font-mono w-4 flex-shrink-0 mt-0.5">{i + 1}.</span>
+                    <div>
+                      <span className="text-xs text-white">#{item.issue_number}</span>
+                      <p className="text-[10px] text-gray-500 mt-0.5">{item.reason}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Merge Suggestions */}
+          {report.merge_suggestions?.length > 0 && (
+            <div>
+              <h4 className="text-xs font-medium text-gray-300 mb-2">{t('project.mergeSuggestions')}</h4>
+              {report.merge_suggestions.map((m, i) => (
+                <div key={i} className="p-2 bg-orange-500/5 border border-orange-500/10 rounded-lg mb-1.5">
+                  <div className="flex items-center gap-1 mb-1">
+                    {m.issue_numbers.map(n => (
+                      <span key={n} className="px-1.5 py-0.5 bg-gray-700 text-[10px] text-white rounded">#{n}</span>
+                    ))}
+                    <span className="text-[10px] text-gray-500">→</span>
+                    <span className="text-[10px] text-orange-300">{m.suggested_title}</span>
+                  </div>
+                  <p className="text-[10px] text-gray-500">{m.reason}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Missing Info */}
+          {report.missing_info?.length > 0 && (
+            <div>
+              <h4 className="text-xs font-medium text-gray-300 mb-2">{t('project.infoNeeded')}</h4>
+              {report.missing_info.map((m, i) => (
+                <div key={i} className="flex items-start gap-2 p-2 bg-yellow-500/5 border border-yellow-500/10 rounded-lg mb-1.5">
+                  <span className="text-xs text-white flex-shrink-0">#{m.issue_number}</span>
+                  <p className="text-[10px] text-yellow-300">{m.what_is_missing}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Risk Flags */}
+          {report.risk_flags?.length > 0 && (
+            <div>
+              <h4 className="text-xs font-medium text-gray-300 mb-2">{t('project.riskFlags')}</h4>
+              {report.risk_flags.map((r, i) => (
+                <div key={i} className="flex items-start gap-2 p-2 bg-red-500/5 border border-red-500/10 rounded-lg mb-1.5">
+                  <span className="text-xs text-white flex-shrink-0">#{r.issue_number}</span>
+                  <p className="text-[10px] text-red-300">{r.risk}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Action Panel — fixed at bottom */}
+        <div className="border-t border-gray-800 p-4 space-y-3 bg-gray-900/95 backdrop-blur-sm">
+          {/* Execution result */}
+          {executionResult && (
+            <div className={`p-2.5 rounded-lg text-xs ${
+              executionResult.success
+                ? 'bg-green-500/10 border border-green-500/20 text-green-300'
+                : 'bg-red-500/10 border border-red-500/20 text-red-300'
+            }`}>
+              {executionResult.success ? '✅' : '❌'} {executionResult.message}
+              {executionResult.changes.length > 0 && (
+                <div className="mt-1 space-y-0.5">
+                  {executionResult.changes.map((c, i) => (
+                    <div key={i} className="text-[10px] text-gray-400">
+                      {c.issue_number > 0 ? `#${c.issue_number}` : '•'} {c.detail}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* AI Suggested Actions */}
+          {suggestedActions.length > 0 && (
+            <div>
+              <div className="text-[10px] text-gray-500 mb-1.5">建议操作</div>
+              <div className="flex flex-wrap gap-1.5">
+                {suggestedActions.map((action, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleExecuteAction(action)}
+                    disabled={executing !== null}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] bg-gray-800 text-gray-200 border border-gray-700 rounded-lg hover:bg-gray-700 hover:border-blue-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={action.description}
+                  >
+                    {executing === action.label ? (
+                      <Loader2 size={10} className="animate-spin" />
+                    ) : action.type === 'merge_issues' ? '🔗' : action.type === 'reorder' ? '📋' : action.type === 'update_description' ? '✏️' : action.type === 'change_priority' ? '⬆️' : '⚡'}
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Custom instruction input */}
+          <div>
+            <div className="text-[10px] text-gray-500 mb-1.5">自定义操作</div>
+            <div className="flex gap-2">
+              <textarea
+                value={customInstruction}
+                onChange={e => setCustomInstruction(e.target.value)}
+                placeholder="输入你想执行的操作，例如：把 #4 拆成两个子任务..."
+                rows={2}
+                className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500 resize-none"
+                onKeyDown={e => { if (e.key === 'Enter' && e.metaKey) handleCustomExecute() }}
+              />
+              <button
+                onClick={handleCustomExecute}
+                disabled={executing !== null || !customInstruction.trim()}
+                className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-xs rounded-lg transition-colors self-end"
+              >
+                {executing === 'custom' ? <Loader2 size={12} className="animate-spin" /> : '执行'}
+              </button>
+            </div>
+            <p className="text-[9px] text-gray-600 mt-1">⌘+Enter 快速执行</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
 // Project Settings Modal
 // ============================================================================
 
@@ -1266,12 +1627,16 @@ function ProjectSettingsModal({ project, autoProcess, onToggleAutoProcess, onClo
   onProjectUpdated: (p: Project) => void
 }) {
   const [scopes, setScopes] = useState<Array<{ id: string; name: string }>>([])
-  const [agents, setAgents] = useState<Array<{ id: string; display_name: string }>>([])
+  const [agents, setAgents] = useState<Array<{ id: string; display_name: string; business_scope_id?: string | null }>>([])
   const [selectedScopeId, setSelectedScopeId] = useState(project.business_scope_id ?? '')
-  const [selectedAgentId, setSelectedAgentId] = useState(project.agent_id ?? '')
+  const [localAutoProcess, setLocalAutoProcess] = useState(autoProcess)
   const [saving, setSaving] = useState(false)
-  const [dirty, setDirty] = useState(false)
   const { t } = useTranslation()
+
+  // Project is "started" if it has a workspace session AND a scope configured.
+  // If scope was never set, user should still be able to set it even if a session exists.
+  const isStarted = !!project.workspace_session_id && !!project.business_scope_id
+  const isDirty = selectedScopeId !== (project.business_scope_id ?? '') || localAutoProcess !== autoProcess
 
   useEffect(() => {
     // Load scopes
@@ -1282,8 +1647,8 @@ function ProjectSettingsModal({ project, autoProcess, onToggleAutoProcess, onClo
     })
     // Load agents
     import('@/services/api').then(({ AgentService }) => {
-      AgentService.getAgents().then((list: Array<{ id: string; displayName: string }>) => {
-        setAgents(list.map(a => ({ id: a.id, display_name: a.displayName })))
+      AgentService.getAgents().then((list: Array<{ id: string; displayName: string; businessScopeId?: string | null }>) => {
+        setAgents(list.map(a => ({ id: a.id, display_name: a.displayName, business_scope_id: a.businessScopeId ?? null })))
       }).catch(() => {})
     })
   }, [])
@@ -1291,73 +1656,72 @@ function ProjectSettingsModal({ project, autoProcess, onToggleAutoProcess, onClo
   const handleSave = async () => {
     setSaving(true)
     try {
-      const updated = await RestProjectService.updateProject(project.id, {
-        business_scope_id: selectedScopeId || undefined,
-        agent_id: selectedAgentId || undefined,
-      })
-      onProjectUpdated(updated)
-      setDirty(false)
+      // Save scope change (only if not started)
+      if (!isStarted && selectedScopeId !== (project.business_scope_id ?? '')) {
+        const updated = await RestProjectService.updateProject(project.id, {
+          business_scope_id: selectedScopeId || undefined,
+        })
+        onProjectUpdated(updated)
+      }
+      // Save auto-process toggle
+      if (localAutoProcess !== autoProcess) {
+        onToggleAutoProcess(localAutoProcess)
+      }
+      onClose()
     } catch (err) {
-      console.error('Failed to update project:', err)
+      console.error('Failed to save settings:', err)
     } finally {
       setSaving(false)
     }
   }
 
+  const handleCancel = () => {
+    onClose()
+  }
+
   const noScope = !selectedScopeId
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-[420px] shadow-2xl" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={handleCancel}>
+      <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-[420px] max-h-[85vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-white">{t('project.settings')}</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-white"><X size={16} /></button>
+          <button onClick={handleCancel} className="text-gray-500 hover:text-white"><X size={16} /></button>
         </div>
 
-        <div className="space-y-4">
-          {/* Business Scope — required for agent execution */}
+        <div className="flex-1 overflow-y-auto space-y-4">
+          {/* Business Scope — locked after project starts */}
           <div>
             <label className="block text-xs text-gray-400 mb-1">{t('project.businessScope')}</label>
-            <select
-              value={selectedScopeId}
-              onChange={e => { setSelectedScopeId(e.target.value); setDirty(true) }}
-              className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-sm text-white outline-none focus:border-blue-500 ${
-                noScope ? 'border-yellow-500/50' : 'border-gray-700'
-              }`}
-            >
-              <option value="">{t('project.noScopeOption')}</option>
-              {scopes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            {noScope && (
-              <p className="text-[10px] text-yellow-400 mt-1">
-                {t('project.noScopeWarning')}
-              </p>
+            {isStarted ? (
+              <>
+                <div className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-sm text-gray-300 cursor-not-allowed">
+                  {scopes.find(s => s.id === selectedScopeId)?.name || selectedScopeId || '未设置'}
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  🔒 项目已启动，业务智能体范围不可更改
+                </p>
+              </>
+            ) : (
+              <>
+                <select
+                  value={selectedScopeId}
+                  onChange={e => setSelectedScopeId(e.target.value)}
+                  className={`w-full px-3 py-2 bg-gray-800 border rounded-lg text-sm text-white outline-none focus:border-blue-500 ${
+                    noScope ? 'border-yellow-500/50' : 'border-gray-700'
+                  }`}
+                >
+                  <option value="">{t('project.noScopeOption')}</option>
+                  {scopes.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                {noScope && (
+                  <p className="text-[10px] text-yellow-400 mt-1">
+                    {t('project.noScopeWarning')}
+                  </p>
+                )}
+              </>
             )}
           </div>
-
-          {/* Agent */}
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">{t('project.agent')}</label>
-            <select
-              value={selectedAgentId}
-              onChange={e => { setSelectedAgentId(e.target.value); setDirty(true) }}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-sm text-white outline-none focus:border-blue-500"
-            >
-              <option value="">{t('project.defaultScopeAgent')}</option>
-              {agents.map(a => <option key={a.id} value={a.id}>{a.display_name}</option>)}
-            </select>
-          </div>
-
-          {/* Save button for scope/agent changes */}
-          {dirty && (
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="w-full py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors"
-            >
-              {saving ? t('project.saving') : t('project.saveScopeAgent')}
-            </button>
-          )}
 
           <div className="border-t border-gray-800 pt-4">
             {/* Auto-process toggle */}
@@ -1370,22 +1734,364 @@ function ProjectSettingsModal({ project, autoProcess, onToggleAutoProcess, onClo
               </div>
               <div className="ml-4 flex-shrink-0">
                 <button
-                  onClick={() => onToggleAutoProcess(!autoProcess)}
-                  className={`relative w-10 h-5 rounded-full transition-colors ${autoProcess ? 'bg-green-600' : 'bg-gray-600'}`}
+                  onClick={() => setLocalAutoProcess(!localAutoProcess)}
+                  className={`relative w-10 h-5 rounded-full transition-colors ${localAutoProcess ? 'bg-green-600' : 'bg-gray-600'}`}
                 >
-                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${autoProcess ? 'left-5.5 translate-x-0.5' : 'left-0.5'}`} />
+                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${localAutoProcess ? 'left-5.5 translate-x-0.5' : 'left-0.5'}`} />
                 </button>
               </div>
             </label>
           </div>
+
+          {/* Project Squad */}
+          <div className="border-t border-gray-800 pt-4">
+            <ProjectSquadPanel projectId={project.id} agents={agents} projectScopeId={selectedScopeId} />
+          </div>
         </div>
 
-        <div className="mt-4 flex justify-end">
-          <button onClick={onClose} className="px-4 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded-lg transition-colors">
-            {t('common.close')}
+        {/* Footer: Save / Cancel */}
+        <div className="mt-4 pt-4 border-t border-gray-800 flex justify-end gap-2">
+          <button onClick={handleCancel} className="px-4 py-2 text-xs text-gray-400 hover:text-white transition-colors">
+            取消
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !isDirty}
+            className="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-xs font-medium rounded-lg transition-colors"
+          >
+            {saving ? '保存中...' : '保存'}
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ============================================================================
+// Project Squad Panel — manage multi-agent team
+// ============================================================================
+
+const SQUAD_ROLES = ['leader', 'frontend', 'backend', 'qa', 'devops', 'worker'] as const
+
+function ProjectSquadPanel({ projectId, agents, projectScopeId }: { projectId: string; agents: Array<{ id: string; display_name: string; business_scope_id?: string | null }>; projectScopeId?: string }) {
+  const { t } = useTranslation()
+  const [squadAgents, setSquadAgents] = useState<ProjectAgent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showAddAgent, setShowAddAgent] = useState(false)
+  const [selectedAgentToAdd, setSelectedAgentToAdd] = useState('')
+  const [selectedRole, setSelectedRole] = useState('worker')
+  const [labelInput, setLabelInput] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [recommending, setRecommending] = useState(false)
+  const [recommendations, setRecommendations] = useState<Array<{ agent_id: string; agent_name: string; suggested_role: string; reason: string; auto_assign_labels: string[] }>>([])
+  const [savedMsg, setSavedMsg] = useState<string | null>(null)
+
+  const showSaved = (msg: string) => {
+    setSavedMsg(msg)
+    setTimeout(() => setSavedMsg(null), 2000)
+  }
+
+  const loadSquad = useCallback(async () => {
+    try {
+      const list = await RestProjectService.listProjectAgents(projectId)
+      setSquadAgents(list)
+    } catch { /* ignore */ }
+    finally { setLoading(false) }
+  }, [projectId])
+
+  useEffect(() => { loadSquad() }, [loadSquad])
+
+  const handleAdd = async () => {
+    if (!selectedAgentToAdd) return
+    setAdding(true)
+    try {
+      const labels = labelInput.trim() ? labelInput.split(',').map(l => l.trim()).filter(Boolean) : []
+      await RestProjectService.addProjectAgent(projectId, {
+        agent_id: selectedAgentToAdd,
+        role: selectedRole,
+        is_leader: selectedRole === 'leader',
+        auto_assign_labels: labels,
+      })
+      setShowAddAgent(false)
+      setSelectedAgentToAdd('')
+      setSelectedRole('worker')
+      setLabelInput('')
+      loadSquad()
+      showSaved('已添加')
+    } catch (err) {
+      console.error('Failed to add agent:', err)
+    } finally { setAdding(false) }
+  }
+
+  const handleRemove = async (agentId: string) => {
+    try {
+      await RestProjectService.removeProjectAgent(projectId, agentId)
+      loadSquad()
+      showSaved('已移除')
+    } catch (err) {
+      console.error('Failed to remove agent:', err)
+    }
+  }
+
+  const handlePromoteLeader = async (agentId: string) => {
+    try {
+      await RestProjectService.updateProjectAgent(projectId, agentId, { is_leader: true, role: 'leader' })
+      loadSquad()
+      showSaved('已设为 Leader')
+    } catch (err) {
+      console.error('Failed to promote agent:', err)
+    }
+  }
+
+  const handleImportFromScope = async () => {
+    setImporting(true)
+    try {
+      const result = await RestProjectService.importScopeAgents(projectId)
+      if (result.imported > 0) {
+        loadSquad()
+        showSaved(`已导入 ${result.imported} 个 Agent`)
+      } else {
+        showSaved('所有 Agent 已在团队中')
+      }
+    } catch (err) {
+      console.error('Failed to import from scope:', err)
+    } finally { setImporting(false) }
+  }
+
+  const handleRecommend = async () => {
+    setRecommending(true)
+    setRecommendations([])
+    try {
+      const result = await RestProjectService.recommendSquad(projectId)
+      setRecommendations(result.recommendations)
+    } catch (err) {
+      console.error('Failed to get recommendations:', err)
+    } finally { setRecommending(false) }
+  }
+
+  const handleAcceptRecommendation = async (rec: { agent_id: string; suggested_role: string; auto_assign_labels: string[] }) => {
+    try {
+      await RestProjectService.addProjectAgent(projectId, {
+        agent_id: rec.agent_id,
+        role: rec.suggested_role,
+        is_leader: rec.suggested_role === 'leader',
+        auto_assign_labels: rec.auto_assign_labels,
+      })
+      setRecommendations(prev => prev.filter(r => r.agent_id !== rec.agent_id))
+      loadSquad()
+      showSaved('已采纳')
+    } catch (err) {
+      console.error('Failed to add recommended agent:', err)
+    }
+  }
+
+  // For manual add: only show agents from OTHER scopes (same-scope agents use "导入Scope")
+  const squadAgentIds = new Set(squadAgents.map(a => a.agent_id))
+  const availableAgents = agents.filter(a => {
+    if (squadAgentIds.has(a.id)) return false
+    // Exclude agents from the project's own scope (those should use "导入Scope")
+    if (projectScopeId && a.business_scope_id === projectScopeId) return false
+    return true
+  })
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <Bot size={14} className="text-purple-400" />
+          <span className="text-xs font-medium text-gray-300">项目团队</span>
+          <span className="text-[10px] text-gray-500">({squadAgents.length})</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleImportFromScope}
+            disabled={importing}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] text-green-400 hover:text-green-300 hover:bg-green-500/10 rounded transition-colors disabled:opacity-50"
+            title="从业务域导入所有 Agent"
+          >
+            {importing ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />}
+            导入Scope
+          </button>
+          <button
+            onClick={handleRecommend}
+            disabled={recommending}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 rounded transition-colors disabled:opacity-50"
+            title="AI 推荐适合此项目的 Agent"
+          >
+            {recommending ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+            AI推荐
+          </button>
+          <button
+            onClick={() => setShowAddAgent(!showAddAgent)}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] text-blue-400 hover:text-blue-300 hover:bg-blue-500/10 rounded transition-colors"
+          >
+            <Plus size={10} /> 手动
+          </button>
+        </div>
+      </div>
+      <p className="text-[9px] text-gray-600 mb-2">
+        团队变更即时生效
+        {savedMsg && <span className="ml-2 text-green-400 animate-pulse">✓ {savedMsg}</span>}
+      </p>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-4">
+          <Loader2 size={14} className="text-gray-500 animate-spin" />
+        </div>
+      ) : squadAgents.length === 0 ? (
+        <p className="text-[10px] text-gray-600 py-2">暂无团队成员。添加 Agent 来组建项目小队。</p>
+      ) : (
+        <div className="space-y-1.5">
+          {squadAgents.map(pa => (
+            <div key={pa.id} className="flex items-center gap-2 px-2.5 py-2 bg-gray-800 border border-gray-700 rounded-lg group">
+              <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500/30 to-blue-500/30 border border-purple-500/20 flex items-center justify-center text-[10px] text-purple-300 flex-shrink-0">
+                {pa.agent.display_name.charAt(0)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-white truncate">{pa.agent.display_name}</span>
+                  {pa.is_leader && (
+                    <Crown size={10} className="text-yellow-400 flex-shrink-0" />
+                  )}
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                    pa.is_leader ? 'bg-yellow-500/15 text-yellow-400 border border-yellow-500/20' :
+                    pa.role === 'frontend' ? 'bg-blue-500/15 text-blue-400 border border-blue-500/20' :
+                    pa.role === 'backend' ? 'bg-green-500/15 text-green-400 border border-green-500/20' :
+                    pa.role === 'qa' ? 'bg-orange-500/15 text-orange-400 border border-orange-500/20' :
+                    'bg-gray-700 text-gray-400 border border-gray-600'
+                  }`}>
+                    {pa.role}
+                  </span>
+                </div>
+                {pa.auto_assign_labels.length > 0 && (
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <Tag size={8} className="text-gray-600" />
+                    {pa.auto_assign_labels.map((label, i) => (
+                      <span key={i} className="text-[9px] text-gray-500">{label}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                {!pa.is_leader && (
+                  <button
+                    onClick={() => handlePromoteLeader(pa.agent_id)}
+                    className="p-1 text-gray-500 hover:text-yellow-400 rounded transition-colors"
+                    title="设为 Leader"
+                  >
+                    <Crown size={11} />
+                  </button>
+                )}
+                <button
+                  onClick={() => handleRemove(pa.agent_id)}
+                  className="p-1 text-gray-500 hover:text-red-400 rounded transition-colors"
+                  title="移除"
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* AI Recommendations */}
+      {recommendations.length > 0 && (
+        <div className="mt-3 p-2.5 bg-purple-500/5 border border-purple-500/15 rounded-lg">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-1.5">
+              <Sparkles size={11} className="text-purple-400" />
+              <span className="text-[10px] font-medium text-purple-300">AI 推荐</span>
+              <span className="text-[9px] text-gray-500">({recommendations.length})</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  for (const rec of recommendations) {
+                    await handleAcceptRecommendation(rec)
+                  }
+                  setRecommendations([])
+                }}
+                className="px-2 py-1 text-[10px] text-green-400 hover:text-green-300 hover:bg-green-500/10 rounded border border-green-500/20 transition-colors"
+              >
+                全部采纳
+              </button>
+              <button
+                onClick={() => setRecommendations([])}
+                className="px-2 py-1 text-[10px] text-gray-500 hover:text-gray-400 transition-colors"
+              >
+                忽略
+              </button>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            {recommendations.map(rec => (
+              <div key={rec.agent_id} className="flex items-center gap-2 px-2 py-1.5 bg-gray-800/50 rounded-lg">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-white truncate">{rec.agent_name}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400 border border-purple-500/20">
+                      {rec.suggested_role}
+                    </span>
+                  </div>
+                  <p className="text-[9px] text-gray-500 mt-0.5 truncate">{rec.reason}</p>
+                </div>
+                <button
+                  onClick={() => handleAcceptRecommendation(rec)}
+                  className="px-2 py-1 text-[10px] text-green-400 hover:text-green-300 hover:bg-green-500/10 rounded transition-colors flex-shrink-0"
+                >
+                  采纳
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Add Agent Form — only shows cross-scope agents (same-scope agents use "导入Scope") */}
+      {showAddAgent && (
+        <div className="mt-2 p-3 bg-gray-800/50 border border-gray-700 rounded-lg space-y-2">
+          <div className="text-[10px] text-gray-500 mb-1">仅显示其他业务域的 Agent（当前域请用"导入Scope"）</div>
+          <select
+            value={selectedAgentToAdd}
+            onChange={e => setSelectedAgentToAdd(e.target.value)}
+            className="w-full px-2.5 py-1.5 bg-gray-900 border border-gray-700 rounded text-xs text-white outline-none focus:border-blue-500"
+          >
+            <option value="">选择跨域 Agent...</option>
+            {availableAgents.map(a => (
+              <option key={a.id} value={a.id}>{a.display_name}</option>
+            ))}
+          </select>
+          <div className="grid grid-cols-2 gap-2">
+            <select
+              value={selectedRole}
+              onChange={e => setSelectedRole(e.target.value)}
+              className="px-2.5 py-1.5 bg-gray-900 border border-gray-700 rounded text-xs text-white outline-none focus:border-blue-500"
+            >
+              {SQUAD_ROLES.map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+            <input
+              value={labelInput}
+              onChange={e => setLabelInput(e.target.value)}
+              placeholder="自动分配标签 (逗号分隔)"
+              className="px-2.5 py-1.5 bg-gray-900 border border-gray-700 rounded text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowAddAgent(false)} className="px-2 py-1 text-[10px] text-gray-400 hover:text-white">取消</button>
+            <button
+              onClick={handleAdd}
+              disabled={adding || !selectedAgentToAdd}
+              className="px-3 py-1 text-[10px] bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded transition-colors"
+            >
+              {adding ? '...' : '添加'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1490,6 +2196,11 @@ function IssueCard({ issue, relations, onDragStart, onClick }: { issue: ProjectI
               <MessageSquare size={10} /> {issue._count.comments}
             </span>
           ) : null}
+          {issue.assigned_agent_id && (
+            <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-medium bg-purple-600/30 border border-purple-500/30 text-purple-300 flex-shrink-0" title="Assigned agent">
+              <Bot size={10} />
+            </div>
+          )}
           <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-medium bg-gray-600 text-gray-300 overflow-hidden flex-shrink-0" title={profile?.full_name ?? 'Creator'}>
             {profile?.avatar_url ? (
               <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
