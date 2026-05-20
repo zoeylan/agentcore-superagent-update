@@ -650,6 +650,8 @@ class CarryForwardService {
         body = body.slice(endIdx + 4).replace(/^\r?\n/, '');
       }
     }
+    // Strip HTML comments (legacy markers that should not be persisted)
+    body = body.replace(/<!--[\s\S]*?-->\s*/g, '');
     body = body.trim();
 
     const scope = await prisma.business_scopes.findUnique({

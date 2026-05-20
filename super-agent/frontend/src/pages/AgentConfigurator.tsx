@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Loader2, Save, CheckCircle, AlertCircle, Plus, X, Pencil, Zap, Upload } from 'lucide-react'
+import { ArrowLeft, Loader2, Save, CheckCircle, AlertCircle, Plus, X, Pencil, Upload } from 'lucide-react'
 import { useTranslation } from '@/i18n'
 import { useAgents } from '@/services'
 import { useBusinessScopes } from '@/services/useBusinessScopes'
@@ -349,15 +349,6 @@ export function AgentConfigurator() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {!isCreateMode && (
-              <button
-                onClick={() => navigate(`/agents/config/${agentId}/workshop`)}
-                className="flex items-center gap-2 px-4 py-2 bg-yellow-600/20 hover:bg-yellow-600/30 border border-yellow-600/40 rounded-lg text-yellow-400 transition-colors"
-              >
-                <Zap className="w-4 h-4" />
-                <span>{t('agentConfig.skillWorkshop')}</span>
-              </button>
-            )}
             <button
               onClick={handleSave}
               disabled={isSaving}

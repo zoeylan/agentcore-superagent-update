@@ -515,9 +515,6 @@ export class WorkspaceManager {
       'title: Scope System Prompt',
       '---',
       '',
-      '<!-- Edit the prose below to evolve the scope-level system prompt. -->',
-      '<!-- Everything above the closing --- is metadata and will be stripped on carry-forward. -->',
-      '',
       body,
       '',
     ];
