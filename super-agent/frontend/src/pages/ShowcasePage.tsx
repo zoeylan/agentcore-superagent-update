@@ -27,6 +27,26 @@ import { RestChatService } from '@/services/api/restChatService'
 // Types
 // ============================================================================
 
+// ============================================================================
+// Types
+// ============================================================================
+
+interface OnboardingVariable {
+  key: string
+  label: string
+  type: 'text' | 'textarea' | 'select' | 'multiselect'
+  required: boolean
+  placeholder?: string
+  options?: string[]
+}
+
+interface OnboardingConfig {
+  title: string
+  description: string
+  variables: OnboardingVariable[]
+  postDeployActions: unknown[]
+}
+
 interface ShowcaseCase {
   id: string
   title: string
@@ -87,12 +107,14 @@ export function ShowcasePage() {
   // Deployment progress modal state
   const [deployModal, setDeployModal] = useState<{
     visible: boolean
-    phase: 'deploying' | 'done'
+    phase: 'onboarding' | 'deploying' | 'done'
     caseName: string
     agentCount: number
     hasWorkflow: boolean
     scopeId?: string
     prompt?: string
+    onboardingConfig?: OnboardingConfig | null
+    caseItem?: ShowcaseCase
   }>({ visible: false, phase: 'deploying', caseName: '', agentCount: 0, hasWorkflow: false })
 
   const loadData = useCallback(async () => {
@@ -129,14 +151,48 @@ export function ShowcasePage() {
     const agentCount = (config.agent_count as number) || 0
     const hasWorkflow = !!(config.has_workflow as boolean)
 
+    // First, check if this pack has onboarding questions
+    try {
+      const onboardingRes = await restClient.get<{ data: OnboardingConfig | null }>(
+        `/api/packs/onboarding/${packId}/${scopeDir}`
+      )
+      const onboardingConfig = onboardingRes.data
+
+      if (onboardingConfig && onboardingConfig.variables.length > 0) {
+        // Show onboarding form first
+        setDeployModal({
+          visible: true,
+          phase: 'onboarding',
+          caseName: c.title,
+          agentCount,
+          hasWorkflow,
+          onboardingConfig,
+          caseItem: c,
+        })
+        return
+      }
+    } catch {
+      // If fetching onboarding fails, proceed without it
+    }
+
+    // No onboarding config — deploy directly
+    executeDeploy(c, agentCount, hasWorkflow)
+  }
+
+  const executeDeploy = async (c: ShowcaseCase, agentCount: number, hasWorkflow: boolean, onboardingVariables?: Record<string, string>) => {
+    const config = c.run_config || {}
+    const packId = config.pack_id as string
+    const scopeDir = config.scope_dir as string || config.twin_dir as string
+
     // Show deployment progress modal
-    setDeployModal({
+    setDeployModal(prev => ({
+      ...prev,
       visible: true,
       phase: 'deploying',
       caseName: c.title,
       agentCount,
       hasWorkflow,
-    })
+    }))
     setDeploying(c.id)
 
     let scopeId: string | undefined
@@ -146,6 +202,7 @@ export function ShowcasePage() {
       const res = await restClient.post<{ data: { scopeId: string } }>('/api/packs/deploy', {
         packId,
         scopeDirName: scopeDir,
+        ...(onboardingVariables && { onboardingVariables }),
       })
       scopeId = res.data?.scopeId
       setDeployedScopes(prev => new Set([...prev, `${packId}/${scopeDir}`]))
@@ -172,6 +229,12 @@ export function ShowcasePage() {
     // Show "done" phase with summary
     const prompt = c.initial_prompt || c.description
     setDeployModal(prev => ({ ...prev, phase: 'done', scopeId, prompt: prompt || undefined }))
+  }
+
+  const handleOnboardingSubmit = (variables: Record<string, string>) => {
+    const { caseItem, agentCount, hasWorkflow } = deployModal
+    if (!caseItem) return
+    executeDeploy(caseItem, agentCount, hasWorkflow, variables)
   }
 
   const handleDeployModalContinue = () => {
@@ -332,6 +395,8 @@ export function ShowcasePage() {
           caseName={deployModal.caseName}
           agentCount={deployModal.agentCount}
           hasWorkflow={deployModal.hasWorkflow}
+          onboardingConfig={deployModal.onboardingConfig}
+          onOnboardingSubmit={handleOnboardingSubmit}
           onContinue={handleDeployModalContinue}
           onClose={() => setDeployModal(prev => ({ ...prev, visible: false }))}
         />
@@ -344,22 +409,25 @@ export function ShowcasePage() {
 // Deployment Progress Modal — shows step-by-step what's being created
 // ============================================================================
 
-function DeployProgressModal({ phase, caseName, agentCount, hasWorkflow, onContinue, onClose }: {
-  phase: 'deploying' | 'done'
+function DeployProgressModal({ phase, caseName, agentCount, hasWorkflow, onboardingConfig, onOnboardingSubmit, onContinue, onClose }: {
+  phase: 'onboarding' | 'deploying' | 'done'
   caseName: string
   agentCount: number
   hasWorkflow: boolean
+  onboardingConfig?: OnboardingConfig | null
+  onOnboardingSubmit: (variables: Record<string, string>) => void
   onContinue: () => void
   onClose: () => void
 }) {
   const [visibleSteps, setVisibleSteps] = useState(0)
+  const [formValues, setFormValues] = useState<Record<string, string>>({})
 
   const steps = [
     { label: '创建业务域 (Business Scope)', icon: Rocket },
     ...(agentCount > 0 ? [{ label: `配置 ${agentCount} 个 AI Agent`, icon: Bot }] : [{ label: '配置 AI Agent', icon: Bot }]),
     { label: '加载技能包与知识库', icon: Brain },
     ...(hasWorkflow ? [{ label: '部署自动化工作流', icon: Zap }] : []),
-    { label: '初始化运行环境', icon: Sparkles },
+    { label: '注入业务上下文', icon: Sparkles },
   ]
 
   useEffect(() => {
@@ -372,108 +440,220 @@ function DeployProgressModal({ phase, caseName, agentCount, hasWorkflow, onConti
         })
       }, 600)
       return () => clearInterval(interval)
-    } else {
-      // When done, show all steps immediately
+    } else if (phase === 'done') {
       setVisibleSteps(steps.length)
     }
   }, [phase, steps.length])
 
+  const isFormValid = () => {
+    if (!onboardingConfig) return true
+    return onboardingConfig.variables
+      .filter(v => v.required)
+      .every(v => (formValues[v.key] || '').trim().length > 0)
+  }
+
+  const handleFormSubmit = () => {
+    onOnboardingSubmit(formValues)
+  }
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-      <div className="bg-gray-800 rounded-2xl border border-gray-700 shadow-2xl w-full max-w-md overflow-hidden">
+      <div className="bg-gray-800 rounded-2xl border border-gray-700 shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-gray-700 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
-              phase === 'done' ? 'bg-emerald-500/20' : 'bg-blue-500/20'
+              phase === 'done' ? 'bg-emerald-500/20' : phase === 'onboarding' ? 'bg-purple-500/20' : 'bg-blue-500/20'
             }`}>
               {phase === 'done' ? (
                 <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+              ) : phase === 'onboarding' ? (
+                <Sparkles className="w-5 h-5 text-purple-400" />
               ) : (
                 <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
               )}
             </div>
             <div>
               <h3 className="text-sm font-semibold text-white">
-                {phase === 'done' ? '部署完成' : '正在部署'}
+                {phase === 'done' ? '部署完成' : phase === 'onboarding' ? (onboardingConfig?.title || '配置业务信息') : '正在部署'}
               </h3>
               <p className="text-xs text-gray-500">{caseName}</p>
             </div>
           </div>
-          {phase === 'done' && (
-            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-500">
-              <X className="w-4 h-4" />
-            </button>
-          )}
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-700 text-gray-500">
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5">
-          <div className="space-y-3">
-            {steps.map((step, i) => {
-              const isVisible = i < visibleSteps
-              const isComplete = phase === 'done' || i < visibleSteps - 1
-              const isCurrent = phase === 'deploying' && i === visibleSteps - 1
+        <div className="px-6 py-5 flex-1 overflow-y-auto">
+          {/* Onboarding Phase — collect business variables */}
+          {phase === 'onboarding' && onboardingConfig && (
+            <div className="space-y-4">
+              <p className="text-sm text-gray-400">{onboardingConfig.description}</p>
+              {onboardingConfig.variables.map(v => (
+                <div key={v.key}>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                    {v.label}
+                    {v.required && <span className="text-red-400 ml-1">*</span>}
+                  </label>
+                  {v.type === 'text' && (
+                    <input
+                      type="text"
+                      placeholder={v.placeholder}
+                      value={formValues[v.key] || ''}
+                      onChange={e => setFormValues(prev => ({ ...prev, [v.key]: e.target.value }))}
+                      className="w-full px-3.5 py-2.5 rounded-lg border border-gray-700 bg-gray-900 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                  )}
+                  {v.type === 'textarea' && (
+                    <textarea
+                      rows={3}
+                      placeholder={v.placeholder}
+                      value={formValues[v.key] || ''}
+                      onChange={e => setFormValues(prev => ({ ...prev, [v.key]: e.target.value }))}
+                      className="w-full px-3.5 py-2.5 rounded-lg border border-gray-700 bg-gray-900 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                    />
+                  )}
+                  {v.type === 'select' && (
+                    <select
+                      value={formValues[v.key] || ''}
+                      onChange={e => setFormValues(prev => ({ ...prev, [v.key]: e.target.value }))}
+                      className="w-full px-3.5 py-2.5 rounded-lg border border-gray-700 bg-gray-900 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">{v.placeholder || '请选择'}</option>
+                      {v.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                    </select>
+                  )}
+                  {v.type === 'multiselect' && (
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {v.options?.map(opt => {
+                        const selected = (formValues[v.key] || '').split(',').filter(Boolean).includes(opt)
+                        return (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => {
+                              const current = (formValues[v.key] || '').split(',').filter(Boolean)
+                              const next = selected ? current.filter(x => x !== opt) : [...current, opt]
+                              setFormValues(prev => ({ ...prev, [v.key]: next.join(',') }))
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                              selected
+                                ? 'bg-blue-500/20 border-blue-500/50 text-blue-400'
+                                : 'bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-600'
+                            }`}
+                          >
+                            {selected && <Check className="w-3 h-3 inline mr-1" />}
+                            {opt}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
-              return (
-                <div
-                  key={i}
-                  className={`flex items-center gap-3 transition-all duration-300 ${
-                    isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
-                  }`}
-                >
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition-colors duration-300 ${
-                    isComplete
-                      ? 'bg-emerald-500/20'
-                      : isCurrent
-                        ? 'bg-blue-500/20'
-                        : 'bg-gray-700'
-                  }`}>
-                    {isComplete ? (
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    ) : isCurrent ? (
-                      <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin" />
-                    ) : (
-                      <step.icon className="w-3 h-3 text-gray-500" />
-                    )}
+          {/* Deploying Phase — step-by-step progress */}
+          {phase === 'deploying' && (
+            <div className="space-y-3">
+              {steps.map((step, i) => {
+                const isVisible = i < visibleSteps
+                const isComplete = i < visibleSteps - 1
+                const isCurrent = i === visibleSteps - 1
+
+                return (
+                  <div
+                    key={i}
+                    className={`flex items-center gap-3 transition-all duration-300 ${
+                      isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
+                    }`}
+                  >
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition-colors duration-300 ${
+                      isComplete
+                        ? 'bg-emerald-500/20'
+                        : isCurrent
+                          ? 'bg-blue-500/20'
+                          : 'bg-gray-700'
+                    }`}>
+                      {isComplete ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : isCurrent ? (
+                        <Loader2 className="w-3.5 h-3.5 text-blue-400 animate-spin" />
+                      ) : (
+                        <step.icon className="w-3 h-3 text-gray-500" />
+                      )}
+                    </div>
+                    <span className={`text-sm ${
+                      isComplete ? 'text-gray-300' : isCurrent ? 'text-white font-medium' : 'text-gray-500'
+                    }`}>
+                      {step.label}
+                    </span>
                   </div>
-                  <span className={`text-sm ${
-                    isComplete ? 'text-gray-300' : isCurrent ? 'text-white font-medium' : 'text-gray-500'
-                  }`}>
-                    {step.label}
+                )
+              })}
+            </div>
+          )}
+
+          {/* Done Phase — summary */}
+          {phase === 'done' && (
+            <>
+              <div className="space-y-3">
+                {steps.map((step, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 bg-emerald-500/20">
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    </div>
+                    <span className="text-sm text-gray-300">{step.label}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-5 p-3 bg-gray-900 rounded-xl border border-gray-700">
+                <p className="text-xs text-gray-400 mb-2">已为你创建</p>
+                <div className="flex items-center gap-4 text-xs">
+                  <span className="flex items-center gap-1 text-blue-400">
+                    <Bot className="w-3.5 h-3.5" />
+                    {agentCount || 1} Agent
+                  </span>
+                  {hasWorkflow && (
+                    <span className="flex items-center gap-1 text-amber-400">
+                      <Zap className="w-3.5 h-3.5" />
+                      含工作流
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1 text-purple-400">
+                    <Brain className="w-3.5 h-3.5" />
+                    技能包已加载
                   </span>
                 </div>
-              )
-            })}
-          </div>
-
-          {/* Done summary */}
-          {phase === 'done' && (
-            <div className="mt-5 p-3 bg-gray-900 rounded-xl border border-gray-700">
-              <p className="text-xs text-gray-400 mb-2">已为你创建</p>
-              <div className="flex items-center gap-4 text-xs">
-                <span className="flex items-center gap-1 text-blue-400">
-                  <Bot className="w-3.5 h-3.5" />
-                  {agentCount || 1} Agent
-                </span>
-                {hasWorkflow && (
-                  <span className="flex items-center gap-1 text-amber-400">
-                    <Zap className="w-3.5 h-3.5" />
-                    含工作流
-                  </span>
-                )}
-                <span className="flex items-center gap-1 text-purple-400">
-                  <Brain className="w-3.5 h-3.5" />
-                  技能包已加载
-                </span>
               </div>
-            </div>
+            </>
           )}
         </div>
 
         {/* Footer */}
-        {phase === 'done' && (
-          <div className="px-6 py-4 border-t border-gray-700">
+        <div className="px-6 py-4 border-t border-gray-700 flex-shrink-0">
+          {phase === 'onboarding' && (
+            <div className="flex items-center justify-between">
+              <button
+                onClick={onClose}
+                className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleFormSubmit}
+                disabled={!isFormValid()}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                开始部署
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+          {phase === 'done' && (
             <button
               onClick={onContinue}
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-500 transition-colors"
@@ -481,8 +661,8 @@ function DeployProgressModal({ phase, caseName, agentCount, hasWorkflow, onConti
               查看详情
               <ArrowRight className="w-4 h-4" />
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )

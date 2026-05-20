@@ -36,6 +36,34 @@ export interface DeployPackInput {
   scopeDirName: string;
   /** Optional: custom name for the deployed scope (defaults to pack's scope name) */
   customName?: string;
+  /** Optional: user-provided onboarding variables to inject as context */
+  onboardingVariables?: Record<string, string>;
+}
+
+// ── Onboarding schema types ──
+
+export interface OnboardingVariable {
+  key: string;
+  label: string;
+  type: 'text' | 'textarea' | 'select' | 'multiselect';
+  required: boolean;
+  placeholder?: string;
+  options?: string[];
+}
+
+export interface OnboardingPostDeployAction {
+  type: 'inject_memory';
+  title: string;
+  category?: string;
+  is_pinned?: boolean;
+  template: string;
+}
+
+export interface OnboardingConfig {
+  title: string;
+  description: string;
+  variables: OnboardingVariable[];
+  postDeployActions: OnboardingPostDeployAction[];
 }
 
 export interface DeployResult {
@@ -73,6 +101,43 @@ class PackDeployService {
   private getPacksBaseDir(): string {
     // industry-packs/ is at the repo root, backend is one level down
     return resolve(process.cwd(), '..', 'industry-packs');
+  }
+
+  /**
+   * Resolve template strings like "Hello {{name}}" with variable values.
+   * Missing variables are replaced with empty string.
+   */
+  private resolveTemplate(template: string, variables: Record<string, string>): string {
+    return template.replace(/\{\{(\w+)\}\}/g, (_, key) => variables[key] || '');
+  }
+
+  /**
+   * Get onboarding config for a pack scope (if it exists).
+   * Returns null if no onboarding.json is defined for this scope.
+   */
+  async getOnboardingConfig(packId: string, scopeDirName: string): Promise<OnboardingConfig | null> {
+    const baseDir = this.getPacksBaseDir();
+    const packDir = join(baseDir, `industry-pack-${packId}`);
+
+    if (!existsSync(packDir)) return null;
+
+    // Check both scopes/ and digital-twins/ directories
+    const scopeDir = join(packDir, 'scopes', scopeDirName);
+    const twinDir = join(packDir, 'digital-twins', scopeDirName);
+    const resolvedDir = existsSync(scopeDir) ? scopeDir : existsSync(twinDir) ? twinDir : null;
+
+    if (!resolvedDir) return null;
+
+    const onboardingPath = join(resolvedDir, 'onboarding.json');
+    if (!existsSync(onboardingPath)) return null;
+
+    try {
+      const config: OnboardingConfig = JSON.parse(await readFile(onboardingPath, 'utf-8'));
+      return config;
+    } catch (err) {
+      console.warn(`[pack-deploy] Failed to read onboarding.json for ${packId}/${scopeDirName}:`, err);
+      return null;
+    }
   }
 
   /**
@@ -156,7 +221,7 @@ class PackDeployService {
    * Deploy (provision) a pack scope into an organization's workspace.
    */
   async deploy(input: DeployPackInput): Promise<DeployResult> {
-    const { organizationId, userId, packId, scopeDirName, customName } = input;
+    const { organizationId, userId, packId, scopeDirName, customName, onboardingVariables } = input;
     const baseDir = this.getPacksBaseDir();
     const packDir = join(baseDir, `industry-pack-${packId}`);
 
@@ -382,23 +447,37 @@ class PackDeployService {
         const headingMatch = skillContent.match(/^#\s+(.+)/m);
         const displayName = headingMatch?.[1] || skillDir.name;
 
-        // Create skill
-        const skill = await skillService.createScopeLevelSkill(
-          organizationId,
-          scope.id,
-          {
-            name: skillDir.name,
-            display_name: displayName,
-            description: `Skill from industry pack: ${packId}/${scopeDirName}`,
-            tags: ['industry-pack', packId],
-            metadata: {
-              source: 'industry-pack',
-              pack_id: packId,
-              scope_dir: scopeDirName,
-              skill_dir: skillDir.name,
+        // Create skill (or find existing if name conflicts)
+        let skill: { id: string };
+        try {
+          skill = await skillService.createScopeLevelSkill(
+            organizationId,
+            scope.id,
+            {
+              name: skillDir.name,
+              display_name: displayName,
+              description: `Skill from industry pack: ${packId}/${scopeDirName}`,
+              tags: ['industry-pack', packId],
+              metadata: {
+                source: 'industry-pack',
+                pack_id: packId,
+                scope_dir: scopeDirName,
+                skill_dir: skillDir.name,
+              },
             },
-          },
-        );
+          );
+        } catch (createErr: any) {
+          // Handle unique constraint violation — skill already exists
+          if (createErr?.code === 'P2002') {
+            const existing = await prisma.skills.findFirst({
+              where: { organization_id: organizationId, name: skillDir.name },
+            });
+            if (!existing) throw createErr;
+            skill = existing;
+          } else {
+            throw createErr;
+          }
+        }
 
         // Write SKILL.md content
         await skillService.updateSkillContent(organizationId, skill.id, skillContent);
@@ -438,6 +517,39 @@ class PackDeployService {
         }
       } catch (err) {
         console.warn(`[pack-deploy] Failed to import memories for ${scopeDirName}:`, err);
+      }
+    }
+
+    // ====================================================================
+    // 4b. Inject onboarding variables as memories (if provided)
+    // ====================================================================
+    if (onboardingVariables && Object.keys(onboardingVariables).length > 0) {
+      const onboardingPath = join(resolvedDir, 'onboarding.json');
+      if (existsSync(onboardingPath)) {
+        try {
+          const onboardingConfig: OnboardingConfig = JSON.parse(
+            await readFile(onboardingPath, 'utf-8'),
+          );
+          for (const action of onboardingConfig.postDeployActions) {
+            if (action.type === 'inject_memory') {
+              const content = this.resolveTemplate(action.template, onboardingVariables);
+              await prisma.scope_memories.create({
+                data: {
+                  organization_id: organizationId,
+                  business_scope_id: scope.id,
+                  title: action.title,
+                  content,
+                  category: action.category || 'fact',
+                  is_pinned: action.is_pinned ?? true,
+                  created_by: userId,
+                },
+              });
+              memoryCount++;
+            }
+          }
+        } catch (err) {
+          console.warn(`[pack-deploy] Failed to inject onboarding variables for ${scopeDirName}:`, err);
+        }
       }
     }
 

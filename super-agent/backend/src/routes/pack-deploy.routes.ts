@@ -28,6 +28,26 @@ export async function packDeployRoutes(fastify: FastifyInstance): Promise<void> 
   });
 
   /**
+   * GET /api/packs/onboarding/:packId/:scopeDirName — Get onboarding config for a scope
+   *
+   * Returns the onboarding questions/variables that should be collected from the user
+   * before deploying this pack scope. Returns null/empty if no onboarding is defined.
+   */
+  fastify.get<{
+    Params: { packId: string; scopeDirName: string }
+  }>('/onboarding/:packId/:scopeDirName', { preHandler: [authenticate] }, async (request, reply) => {
+    const { packId, scopeDirName } = request.params;
+
+    try {
+      const config = await packDeployService.getOnboardingConfig(packId, scopeDirName);
+      return reply.send({ data: config });
+    } catch (err: any) {
+      console.error('[pack-deploy] Failed to get onboarding config:', err);
+      return reply.status(500).send({ error: 'Failed to get onboarding config', code: 'ONBOARDING_ERROR' });
+    }
+  });
+
+  /**
    * POST /api/packs/deploy — Deploy a pack scope into the organization
    *
    * This is the "领用" action. It reads the pack from file system and
@@ -37,15 +57,17 @@ export async function packDeployRoutes(fastify: FastifyInstance): Promise<void> 
    *   - packId: string (e.g. "customer-service")
    *   - scopeDirName: string (e.g. "ticket-processing")
    *   - customName?: string (optional override for the scope name)
+   *   - onboardingVariables?: Record<string, string> (user-provided business context)
    */
   fastify.post<{
     Body: {
       packId: string;
       scopeDirName: string;
       customName?: string;
+      onboardingVariables?: Record<string, string>;
     }
   }>('/deploy', { preHandler: [authenticate] }, async (request, reply) => {
-    const { packId, scopeDirName, customName } = request.body;
+    const { packId, scopeDirName, customName, onboardingVariables } = request.body;
 
     if (!packId || !scopeDirName) {
       return reply.status(400).send({
@@ -61,6 +83,7 @@ export async function packDeployRoutes(fastify: FastifyInstance): Promise<void> 
         packId,
         scopeDirName,
         customName,
+        onboardingVariables,
       });
 
       return reply.status(201).send({ data: result });
