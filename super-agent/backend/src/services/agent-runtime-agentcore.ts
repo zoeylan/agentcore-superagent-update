@@ -144,7 +144,7 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
       scope_id: scopeId,
       org_id: options.organizationId,
       agent_id: options.agentId,
-      system_prompt: agentConfig.systemPrompt ?? undefined,
+      system_prompt: this.buildSystemPromptWithBrowserRegion(agentConfig.systemPrompt),
       model: agentConfig.model ?? undefined,
       mcp_servers: serializableMcpServers,
       workspace_s3_bucket: this.workspaceBucket,
@@ -815,28 +815,71 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
     if (event.type !== 'assistant' || !event.content) return null;
 
     for (const block of event.content) {
-      if (block.type !== 'tool_use' || !block.name) continue;
+      // Strategy 1: Check tool_result blocks for live_view_url from start_browser_session
+      // This is the fastest path — the URL is already in the response, no extra API call needed
+      if (block.type === 'tool_result') {
+        const content = typeof block.content === 'string' ? block.content : '';
+        if (content.includes('live_view_url')) {
+          try {
+            // Try to find JSON with live_view_url
+            const jsonMatch = content.match(/\{[^{}]*"live_view_url"\s*:\s*"[^"]+?"[^{}]*\}/);
+            if (jsonMatch) {
+              const parsed = JSON.parse(jsonMatch[0]);
+              if (parsed.live_view_url && parsed.session_id && !seenSessions.has(parsed.session_id + ':done')) {
+                seenSessions.add(parsed.session_id);
+                seenSessions.add(parsed.session_id + ':done');
+                
+                // Sign the URL
+                try {
+                  const { browserLiveViewService } = await import('./browser-live-view.service.js');
+                  const result = await browserLiveViewService.getLiveViewUrl(parsed.session_id);
+                  console.log(`[agentcore-runtime] Browser live view ready (from tool_result): session=${parsed.session_id}`);
+                  return {
+                    type: 'browser_live_view_ready',
+                    sessionId: parsed.session_id,
+                    liveViewUrl: result.liveViewUrl,
+                    browserIdentifier: result.browserIdentifier,
+                  };
+                } catch {
+                  // If signing fails, return unsigned URL (frontend will try anyway)
+                  console.log(`[agentcore-runtime] Browser live view ready (unsigned): session=${parsed.session_id}`);
+                  return {
+                    type: 'browser_live_view_ready',
+                    sessionId: parsed.session_id,
+                    liveViewUrl: parsed.live_view_url,
+                    browserIdentifier: parsed.browser_identifier ?? 'aws.browser.v1',
+                  };
+                }
+              }
+            }
+          } catch { /* not parseable */ }
+        }
+      }
 
-      // Match browser tool names (bare or MCP-prefixed)
+      // Strategy 2: Fallback — detect tool_use with session_id and call GetBrowserSession
+      if (block.type !== 'tool_use' || !block.name) continue;
       const bare = block.name.includes('__') ? block.name.split('__').pop()! : block.name;
       if (!bare.startsWith('browser_')) continue;
 
-      // Extract session_id from tool input
       const input = block.input as Record<string, unknown> | undefined;
       const browserSessionId = input?.session_id as string | undefined;
       if (!browserSessionId) continue;
 
-      // Only process each session_id once
-      if (seenSessions.has(browserSessionId)) continue;
-      seenSessions.add(browserSessionId);
+      // Already handled
+      if (seenSessions.has(browserSessionId + ':done')) continue;
 
-      // Fetch live view URL from AgentCore
+      // Mark first occurrence, trigger on second
+      const key = browserSessionId;
+      if (!seenSessions.has(key)) {
+        seenSessions.add(key);
+        continue;
+      }
+      seenSessions.add(key + ':done');
+
       try {
         const { browserLiveViewService } = await import('./browser-live-view.service.js');
         const result = await browserLiveViewService.getLiveViewUrl(browserSessionId);
-        console.log(
-          `[agentcore-runtime] Browser live view ready: session=${browserSessionId}, url=${result.liveViewUrl.slice(0, 80)}...`
-        );
+        console.log(`[agentcore-runtime] Browser live view ready (fallback): session=${browserSessionId}`);
         return {
           type: 'browser_live_view_ready',
           sessionId: browserSessionId,
@@ -848,7 +891,6 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
           `[agentcore-runtime] Failed to get browser live view URL for session ${browserSessionId}:`,
           err instanceof Error ? err.message : err
         );
-        // Non-fatal — screenshots still work as fallback
         return null;
       }
     }
@@ -894,6 +936,13 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
           code: event.code ?? 'AGENTCORE_ERROR',
           message: event.message ?? 'Unknown error',
         };
+      case 'browser_live_view_ready':
+        return {
+          type: 'browser_live_view_ready',
+          sessionId: (event as any).sessionId,
+          liveViewUrl: (event as any).liveViewUrl,
+          browserIdentifier: (event as any).browserIdentifier,
+        };
       default:
         return {
           type: 'error',
@@ -901,6 +950,17 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
           message: `Unknown event type: ${(event as any).type}`,
         };
     }
+  }
+
+  private buildSystemPromptWithBrowserRegion(basePrompt: string | null | undefined): string | undefined {
+    const arnRegion = config.agentcore.runtimeArn?.split(':')[3];
+    const browserRegion = arnRegion || config.aws?.region || 'ap-northeast-1';
+    const browserInstruction = `\n\nIMPORTANT: When calling start_browser_session, always include the parameter "region": "${browserRegion}".`;
+    
+    if (basePrompt) {
+      return basePrompt + browserInstruction;
+    }
+    return browserInstruction.trim();
   }
 
   private async readBody(stream: any): Promise<string> {

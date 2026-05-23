@@ -210,56 +210,71 @@ export function BrowserLiveView() {
 
   // Listen for browser-live-view-ready events (DCV stream URL)
   useEffect(() => {
+    // Track which session we've already connected to — ignore duplicates
+    let connectedSessionId: string | null = null
+
     const handleLiveViewReady = (e: Event) => {
       const { liveViewUrl, sessionId: evtSessionId } = (e as CustomEvent).detail
       if (!liveViewUrl) return
 
+      // Ignore duplicate events for the same session
+      if (connectedSessionId === evtSessionId) {
+        console.log('[BrowserLiveView] Ignoring duplicate live view event for session:', evtSessionId)
+        return
+      }
+
       console.log('[BrowserLiveView] Live view ready event received, sessionId:', evtSessionId)
+      connectedSessionId = evtSessionId
       setSessionId(evtSessionId)
       setVisible(true)
       setError(null)
 
+      // Disconnect any previous connection (different session)
+      disconnectDCV()
+
       // Load SDK if not loaded, then connect
       if (!dcvLoaded && !window.dcv) {
         loadDCVSDK()
-        // Wait for SDK to load, then connect
         const checkInterval = setInterval(() => {
           if (window.dcv) {
             clearInterval(checkInterval)
             connectToDCV(liveViewUrl)
           }
         }, 100)
-        // Timeout after 10s
         setTimeout(() => clearInterval(checkInterval), 10000)
       } else {
-        // Disconnect any existing connection first
-        disconnectDCV()
         connectToDCV(liveViewUrl)
       }
     }
 
     window.addEventListener('browser-live-view-ready', handleLiveViewReady)
-    return () => window.removeEventListener('browser-live-view-ready', handleLiveViewReady)
+    return () => {
+      window.removeEventListener('browser-live-view-ready', handleLiveViewReady)
+    }
   }, [dcvLoaded, loadDCVSDK, connectToDCV, disconnectDCV])
 
   // Listen for browser-frame events (screenshot fallback)
+  // Also makes the panel visible early — as soon as any browser tool runs
   useEffect(() => {
     const handleBrowserFrame = (e: Event) => {
       const { screenshotData, browserToolName } = (e as CustomEvent).detail
       if (screenshotData) {
         setScreenshot(screenshotData)
         setToolName(browserToolName)
-        // Only show panel if not already showing DCV
+        // Show panel immediately on first browser frame
+        if (!visible) {
+          setVisible(true)
+        }
+        // Use screenshot mode if DCV isn't connected yet
         if (mode !== 'dcv' && mode !== 'connecting') {
           setMode('screenshot')
-          setVisible(true)
         }
       }
     }
 
     window.addEventListener('browser-frame', handleBrowserFrame)
     return () => window.removeEventListener('browser-frame', handleBrowserFrame)
-  }, [mode])
+  }, [mode, visible])
 
   // Cleanup on unmount
   useEffect(() => {

@@ -46,7 +46,9 @@ USER node
 # within /workspace and get synced to S3.
 ENV HOME=/workspace
 
-WORKDIR /workspace
+# Keep WORKDIR as /app so Node.js ESM module resolution finds /app/node_modules.
+# The agent uses cwd='/workspace' explicitly in its SDK options.
+WORKDIR /app
 
 # AgentCore protocol requires port 8080
 EXPOSE 8080

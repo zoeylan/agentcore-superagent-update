@@ -797,6 +797,9 @@ export class WorkspaceManager {
         args: ['awslabs.amazon-bedrock-agentcore-mcp-server@latest'],
         env: {
           AWS_REGION: agentcoreRegion,
+          AWS_DEFAULT_REGION: agentcoreRegion,
+          BROWSER_REGION: agentcoreRegion,
+          AGENTCORE_BROWSER_REGION: agentcoreRegion,
           FASTMCP_LOG_LEVEL: 'ERROR',
         },
       };
