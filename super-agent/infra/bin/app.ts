@@ -16,8 +16,8 @@ const stackName = app.node.tryGetContext('stackName') || 'SuperAgent';
 
 new SuperAgentStack(app, stackName, {
   env: {
-    account: '862378407095',
-    region: 'ap-northeast-1',
+    account: process.env.CDK_DEFAULT_ACCOUNT,
+    region: process.env.CDK_DEFAULT_REGION || 'ap-northeast-1',
   },
   description: `Super Agent Platform - ${stackName}`,
 });

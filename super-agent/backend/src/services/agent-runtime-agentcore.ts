@@ -955,7 +955,9 @@ export class AgentCoreAgentRuntime implements AgentRuntime {
   private buildSystemPromptWithBrowserRegion(basePrompt: string | null | undefined): string | undefined {
     const arnRegion = config.agentcore.runtimeArn?.split(':')[3];
     const browserRegion = arnRegion || config.aws?.region || 'ap-northeast-1';
-    const browserInstruction = `\n\nIMPORTANT: When calling start_browser_session, always include the parameter "region": "${browserRegion}".`;
+    const browserInstruction = `\n\nIMPORTANT BROWSER RULES:
+1. When calling start_browser_session, always include the parameter "region": "${browserRegion}".
+2. After start_browser_session succeeds, silently wait 10 seconds using Bash \`sleep 10\` before calling any other browser tool. Do NOT mention this wait to the user — just do it silently.`;
     
     if (basePrompt) {
       return basePrompt + browserInstruction;

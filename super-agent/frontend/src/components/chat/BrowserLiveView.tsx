@@ -35,13 +35,13 @@ export function BrowserLiveView() {
   const [sessionId, setSessionId] = useState<string | null>(null)
 
   // Drag state
-  const [position, setPosition] = useState({ x: 20, y: 20 })
+  const [position, setPosition] = useState({ x: window.innerWidth / 2 - 400, y: window.innerHeight / 2 - 250 })
   const [dragging, setDragging] = useState(false)
   const dragOffset = useRef({ x: 0, y: 0 })
   const panelRef = useRef<HTMLDivElement>(null)
 
   // Resize state
-  const [size, setSize] = useState({ width: 640, height: 480 })
+  const [size, setSize] = useState({ width: 800, height: 500 })
   const [resizing, setResizing] = useState(false)
   const resizeStart = useRef({ x: 0, y: 0, width: 0, height: 0 })
 
@@ -139,6 +139,23 @@ export function BrowserLiveView() {
     })
   }, [])
 
+  // Scale DCV content to fit panel width
+  const scaleDcvCanvas = useCallback(() => {
+    const wrapper = document.getElementById('dcv-live-wrapper')
+    const dcvDisplay = document.getElementById('dcv-live-display')
+    if (!wrapper || !dcvDisplay) return
+
+    const availableWidth = wrapper.clientWidth
+    if (!availableWidth) return
+
+    // DCV content is always 1456x824
+    const scale = availableWidth / 1456
+    dcvDisplay.style.transform = `scale(${scale})`
+    
+    // Set wrapper height to exactly match scaled content (no black space)
+    wrapper.style.height = `${Math.ceil(824 * scale)}px`
+  }, [])
+
   const connectToSession = useCallback((serverUrl: string, dcvSessionId: string, authToken: string) => {
     const displayElement = document.getElementById('dcv-live-display')
     if (!displayElement) {
@@ -164,9 +181,12 @@ export function BrowserLiveView() {
           console.log('[BrowserLiveView] First frame received - DCV stream active')
           setMode('dcv')
           setError(null)
+          // Scale canvas to fit container after first frame
+          setTimeout(() => scaleDcvCanvas(), 200)
         },
         displayLayout: (serverWidth: number, serverHeight: number) => {
           console.log(`[BrowserLiveView] Display layout: ${serverWidth}x${serverHeight}`)
+          setTimeout(() => scaleDcvCanvas(), 200)
         },
         error: (connError: any) => {
           console.error('[BrowserLiveView] DCV connection error:', connError)
@@ -207,6 +227,19 @@ export function BrowserLiveView() {
       authRef.current = null
     }
   }, [])
+
+  // Listen for early browser-session-starting event (show panel immediately with loading)
+  useEffect(() => {
+    const handleSessionStarting = () => {
+      if (!visible) {
+        setVisible(true)
+        setMode('connecting')
+        loadDCVSDK()
+      }
+    }
+    window.addEventListener('browser-session-starting', handleSessionStarting)
+    return () => window.removeEventListener('browser-session-starting', handleSessionStarting)
+  }, [visible, loadDCVSDK])
 
   // Listen for browser-live-view-ready events (DCV stream URL)
   useEffect(() => {
@@ -334,14 +367,18 @@ export function BrowserLiveView() {
         height: Math.max(300, resizeStart.current.height + dy),
       })
     }
-    const handleMouseUp = () => setResizing(false)
+    const handleMouseUp = () => {
+      setResizing(false)
+      // Re-scale DCV canvas after resize
+      setTimeout(() => scaleDcvCanvas(), 100)
+    }
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
     return () => {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [resizing])
+  }, [resizing, scaleDcvCanvas])
 
   const handleClose = useCallback(() => {
     setVisible(false)
@@ -350,7 +387,9 @@ export function BrowserLiveView() {
 
   const toggleExpanded = useCallback(() => {
     setExpanded(prev => !prev)
-  }, [])
+    // Re-scale after expand/collapse animation
+    setTimeout(() => scaleDcvCanvas(), 300)
+  }, [scaleDcvCanvas])
 
   if (!visible) return null
 
@@ -369,7 +408,7 @@ export function BrowserLiveView() {
       ref={panelRef}
       className={`fixed z-50 flex flex-col bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden ${
         dragging || resizing ? 'select-none' : ''
-      } ${expanded ? 'inset-10' : ''}`}
+      } ${expanded ? 'inset-0' : ''}`}
       style={expanded ? {} : { top: position.y, left: position.x, width: size.width, height: size.height }}
     >
       {/* Header - draggable */}
@@ -414,7 +453,7 @@ export function BrowserLiveView() {
       </div>
 
       {/* Content area */}
-      <div className="flex-1 relative overflow-hidden bg-gray-950 flex items-center justify-center">
+      <div className="relative overflow-hidden bg-gray-950">
         {/* Error banner */}
         {error && (
           <div className="absolute top-0 left-0 right-0 z-10 px-3 py-1.5 bg-red-900/80 text-red-200 text-xs truncate">
@@ -422,20 +461,33 @@ export function BrowserLiveView() {
           </div>
         )}
 
-        {/* DCV display container */}
+        {/* DCV display container - wrapped in a scaling container */}
         {(mode === 'dcv' || mode === 'connecting') && (
           <div
-            id="dcv-live-display"
-            ref={dcvContainerRef}
+            id="dcv-live-wrapper"
             style={{
               width: '100%',
               height: '100%',
-              position: 'absolute',
-              top: 0,
-              left: 0,
+              overflow: 'hidden',
+              position: 'relative',
             }}
-          />
+          >
+            <div
+              id="dcv-live-display"
+              ref={dcvContainerRef}
+              style={{
+                width: '1456px',
+                height: '824px',
+                transformOrigin: 'top left',
+                position: 'absolute',
+                top: 0,
+                left: 0,
+              }}
+            />
+          </div>
         )}
+
+        {/* No extra style tag needed - scaling is done via JS on the wrapper */}
 
         {/* Loading state while connecting */}
         {mode === 'connecting' && (

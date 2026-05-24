@@ -164,6 +164,14 @@ class SessionStreamManager {
           if (event.model) lastModel = event.model
           const serialized = JSON.stringify(allBlocks)
           this.updateMessage(sessionId, aiMessageId, serialized, event.speakerAgentName, event.speakerAgentAvatar)
+          
+          // Detect browser tool_use early — show live view panel immediately
+          for (const block of event.content) {
+            if (block.type === 'tool_use' && block.name?.includes('start_browser_session')) {
+              window.dispatchEvent(new CustomEvent('browser-session-starting', { detail: {} }))
+              break
+            }
+          }
         },
         onResult: (event) => {
           // result event = AI response complete. Stop loading immediately
