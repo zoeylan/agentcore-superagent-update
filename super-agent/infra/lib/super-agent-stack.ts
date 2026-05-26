@@ -187,6 +187,27 @@ export class SuperAgentStack extends cdk.Stack {
       resources: [`arn:aws:bedrock-agentcore:${this.region}:${this.account}:runtime/*`],
     }));
 
+    // AgentCore command + browser + code-interpreter permissions (for workspace sync and browser live view)
+    role.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        'bedrock-agentcore:InvokeAgentRuntimeCommand',
+        'bedrock-agentcore:StopRuntimeSession',
+        'bedrock-agentcore:StartBrowserSession',
+        'bedrock-agentcore:StopBrowserSession',
+        'bedrock-agentcore:GetBrowserSession',
+        'bedrock-agentcore:ListBrowserSessions',
+        'bedrock-agentcore:ConnectBrowserAutomationStream',
+        'bedrock-agentcore:ConnectBrowserLiveViewStream',
+        'bedrock-agentcore:UpdateBrowserStream',
+        'bedrock-agentcore:StartCodeInterpreterSession',
+        'bedrock-agentcore:InvokeCodeInterpreter',
+        'bedrock-agentcore:StopCodeInterpreterSession',
+        'bedrock-agentcore:GetCodeInterpreterSession',
+        'bedrock-agentcore:ListCodeInterpreterSessions',
+      ],
+      resources: ['*'],
+    }));
+
     // =========================================================================
     // S3 Buckets
     // =========================================================================
