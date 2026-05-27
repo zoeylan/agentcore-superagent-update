@@ -161,7 +161,7 @@ export function SessionHistoryPanel({
   }
 
   return (
-    <div className="w-60 flex flex-col border-r border-gray-800 bg-gray-900/50 flex-shrink-0">
+    <div className="w-32 flex flex-col border-r border-gray-800 bg-gray-900/50 flex-shrink-0 min-w-[100px] max-w-[400px] resize-x overflow-hidden" style={{ resize: 'horizontal' }}>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3 border-b border-gray-800">
         <span className="text-sm font-medium text-gray-300">Sessions</span>

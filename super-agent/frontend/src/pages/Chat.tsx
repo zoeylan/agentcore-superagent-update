@@ -1864,9 +1864,24 @@ function ChatInterfaceContent() {
   }, [backendSessionId])
 
   // Resizable workspace panel
-  const [panelWidth, setPanelWidth] = useState(288) // 18rem ≈ 288px
-  const [workspaceMode, setWorkspaceMode] = useState<'artifacts' | 'files'>('artifacts')
+  const [panelWidth, setPanelWidth] = useState(Math.floor((window.innerWidth - 128) / 2)) // 右边两块 1:1 默认（减去左侧 session 面板宽度后平分）
+  const [workspaceMode, setWorkspaceMode] = useState<'artifacts' | 'files' | 'liveview'>('artifacts')
   const [panelCollapsed, setPanelCollapsed] = useState(false)
+
+  // Auto-switch to liveview tab when browser session starts
+  useEffect(() => {
+    const handleBrowserStart = () => {
+      setWorkspaceMode('liveview')
+      setPanelCollapsed(false)
+    }
+    window.addEventListener('browser-session-starting', handleBrowserStart)
+    window.addEventListener('browser-live-view-ready', handleBrowserStart)
+    return () => {
+      window.removeEventListener('browser-session-starting', handleBrowserStart)
+      window.removeEventListener('browser-live-view-ready', handleBrowserStart)
+    }
+  }, [])
+
   // When a file is being previewed, collapse side panels for a clean left-chat / right-preview layout
   const [previewingFile, setPreviewingFile] = useState<{ path: string; name: string } | null>(null)
 
@@ -2268,12 +2283,42 @@ function ChatInterfaceContent() {
             </button>
           </div>
         ) : (
+          <>
+          {/* Resize handle for right panel */}
+          <div
+            className="w-1 cursor-col-resize hover:bg-blue-500/50 active:bg-blue-500 transition-colors flex-shrink-0"
+            onMouseDown={(e) => {
+              e.preventDefault()
+              const startX = e.clientX
+              const startWidth = panelWidth
+              const onMouseMove = (ev: MouseEvent) => {
+                const delta = startX - ev.clientX
+                setPanelWidth(Math.max(200, Math.min(window.innerWidth * 0.7, startWidth + delta)))
+              }
+              const onMouseUp = () => {
+                window.removeEventListener('mousemove', onMouseMove)
+                window.removeEventListener('mouseup', onMouseUp)
+              }
+              window.addEventListener('mousemove', onMouseMove)
+              window.addEventListener('mouseup', onMouseUp)
+            }}
+          />
           <div
             className="border-l border-gray-800 bg-gray-900 flex flex-col flex-shrink-0"
             style={{ width: panelWidth, minWidth: 200 }}
           >
             {/* Mode toggle tabs + collapse button */}
             <div className="flex border-b border-gray-800 flex-shrink-0">
+              <button
+                onClick={() => setWorkspaceMode('liveview')}
+                className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                  workspaceMode === 'liveview'
+                    ? 'text-green-400 border-b-2 border-green-400 bg-gray-800/50'
+                    : 'text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                🖥️ 实时浏览
+              </button>
               <button
                 onClick={() => setWorkspaceMode('artifacts')}
                 className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
@@ -2305,7 +2350,9 @@ function ChatInterfaceContent() {
 
             {/* Panel content based on mode */}
             <div className="flex-1 overflow-hidden">
-              {workspaceMode === 'artifacts' ? (
+              {workspaceMode === 'liveview' ? (
+                <BrowserLiveView embedded={true} />
+              ) : workspaceMode === 'artifacts' ? (
                 <ArtifactListPanel
                   sessionId={backendSessionId}
                   isGenerating={isSending}
@@ -2338,11 +2385,9 @@ function ChatInterfaceContent() {
               )}
             </div>
           </div>
+          </>
         )
       )}
-
-      {/* Browser Live View — floating panel for browser tool screenshots */}
-      <BrowserLiveView />
 
       {/* Save to Memory modal */}
       {showSaveMemory && backendSessionId && selectedBusinessScopeId && (

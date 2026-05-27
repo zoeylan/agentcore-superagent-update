@@ -24,8 +24,12 @@ declare global {
 
 type ConnectionMode = 'none' | 'connecting' | 'dcv' | 'screenshot'
 
-export function BrowserLiveView() {
-  const [visible, setVisible] = useState(false)
+interface BrowserLiveViewProps {
+  embedded?: boolean;
+}
+
+export function BrowserLiveView({ embedded = false }: BrowserLiveViewProps) {
+  const [visible, setVisible] = useState(embedded)
   const [mode, setMode] = useState<ConnectionMode>('none')
   const [screenshot, setScreenshot] = useState<string | null>(null)
   const [toolName, setToolName] = useState<string | undefined>(undefined)
@@ -231,15 +235,13 @@ export function BrowserLiveView() {
   // Listen for early browser-session-starting event (show panel immediately with loading)
   useEffect(() => {
     const handleSessionStarting = () => {
-      if (!visible) {
-        setVisible(true)
-        setMode('connecting')
-        loadDCVSDK()
-      }
+      setVisible(true)
+      setMode('connecting')
+      loadDCVSDK()
     }
     window.addEventListener('browser-session-starting', handleSessionStarting)
     return () => window.removeEventListener('browser-session-starting', handleSessionStarting)
-  }, [visible, loadDCVSDK])
+  }, [loadDCVSDK])
 
   // Listen for browser-live-view-ready events (DCV stream URL)
   useEffect(() => {
@@ -391,7 +393,7 @@ export function BrowserLiveView() {
     setTimeout(() => scaleDcvCanvas(), 300)
   }, [scaleDcvCanvas])
 
-  if (!visible) return null
+  if (!visible && !embedded) return null
 
   const statusLabel = mode === 'dcv'
     ? 'Live Stream'
@@ -402,6 +404,69 @@ export function BrowserLiveView() {
     : 'Waiting...'
 
   const StatusIcon = mode === 'dcv' ? Wifi : mode === 'connecting' ? Loader2 : WifiOff
+
+  // Embedded mode: render just the content area, no floating panel
+  if (embedded) {
+    return (
+      <div className="flex flex-col h-full bg-gray-950">
+        {/* Status bar */}
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-800 flex-shrink-0">
+          <Monitor className="w-3.5 h-3.5 text-blue-400" />
+          <span className="text-xs text-gray-400">Browser Live View</span>
+          {sessionId && <span className="text-xs text-gray-600">({sessionId.slice(0, 10)}...)</span>}
+          <span className={`ml-auto flex items-center gap-1 text-xs px-1.5 py-0.5 rounded ${
+            mode === 'dcv' ? 'bg-green-900/50 text-green-400' :
+            mode === 'connecting' ? 'bg-yellow-900/50 text-yellow-400' :
+            'bg-gray-700 text-gray-400'
+          }`}>
+            <StatusIcon className={`w-3 h-3 ${mode === 'connecting' ? 'animate-spin' : ''}`} />
+            {statusLabel}
+          </span>
+        </div>
+
+        {/* Error banner */}
+        {error && (
+          <div className="px-3 py-1.5 bg-red-900/80 text-red-200 text-xs truncate flex-shrink-0">
+            {error}
+          </div>
+        )}
+
+        {/* Content */}
+        <div className="flex-1 relative overflow-hidden flex items-center justify-center">
+          {(mode === 'dcv' || mode === 'connecting') && (
+            <div
+              id="dcv-live-wrapper"
+              style={{ width: '100%', overflow: 'hidden', position: 'relative' }}
+            >
+              <div
+                id="dcv-live-display"
+                ref={dcvContainerRef}
+                style={{ width: '1456px', height: '824px', transformOrigin: 'top left', position: 'absolute', top: 0, left: 0 }}
+              />
+            </div>
+          )}
+
+          {mode === 'connecting' && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400 z-10">
+              <Loader2 className="w-6 h-6 animate-spin mb-2" />
+              <span className="text-sm">正在连接实时浏览器...</span>
+            </div>
+          )}
+
+          {mode === 'screenshot' && screenshot && (
+            <img src={screenshot} alt="Browser screenshot" className="max-w-full max-h-full object-contain" draggable={false} />
+          )}
+
+          {mode === 'none' && !error && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-500">
+              <Monitor className="w-8 h-8 mb-2 opacity-50" />
+              <span className="text-sm">等待浏览器会话启动...</span>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
