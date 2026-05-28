@@ -35,6 +35,17 @@ export interface NormalizedIMMessage {
    * When false, the message routes to the binding's sticky session for context continuity.
    */
   isExplicitThread?: boolean;
+  /** Files attached to this message (downloaded from IM platform). */
+  attachedFiles?: Array<{ fileName: string; content: Buffer }>;
+  /**
+   * File references to download lazily (for queue-safe serialization).
+   * The actual download happens in the worker, not at enqueue time.
+   */
+  pendingFileDownloads?: Array<{
+    fileName: string;
+    messageId: string;
+    fileKey: string;
+  }>;
 }
 
 /** Adapter interface — each IM platform implements this. */
@@ -176,24 +187,138 @@ class IMService {
     // 2. Resolve or create session
     const { sessionId } = await this.resolveSession(binding, msg);
 
-    // 3. Process message through ChatService (same code path as web UI)
-    // Use binding's creator as the system userId (IM platform user IDs are not UUIDs)
     const systemUserId = binding.created_by || 'system';
-    const response = await chatService.processMessage({
-      sessionId,
-      businessScopeId: binding.business_scope_id,
-      message: msg.text,
-      organizationId: binding.organization_id,
-      userId: systemUserId,
-    });
 
-    // 4. Send reply back
-    const adapter = this.adapters.get(msg.channelType);
-    if (adapter) {
-      await adapter.sendReply(binding, msg.threadId, response.text, replyContext);
+    // 3. Handle file messages: only save to workspace, do NOT trigger agent
+    if (msg.pendingFileDownloads && msg.pendingFileDownloads.length > 0) {
+      const { feishuAdapter } = await import('./feishu-adapter.js');
+      const { workspaceManager } = await import('./workspace-manager.js');
+      const savedFiles: string[] = [];
+
+      for (const fileRef of msg.pendingFileDownloads) {
+        try {
+          console.log(`[IM] Downloading pending file: ${fileRef.fileName} (messageId=${fileRef.messageId}, fileKey=${fileRef.fileKey})`);
+          const fileBuffer = await feishuAdapter.downloadFile(binding, fileRef.messageId, fileRef.fileKey);
+          if (fileBuffer) {
+            const ok = await workspaceManager.writeWorkspaceFileRaw(
+              binding.organization_id,
+              binding.business_scope_id,
+              sessionId,
+              fileRef.fileName,
+              fileBuffer,
+            );
+            if (ok) {
+              savedFiles.push(fileRef.fileName);
+              console.log(`[IM] Wrote attached file to workspace: ${fileRef.fileName}`);
+            }
+          }
+        } catch (err) {
+          console.error(`[IM] Error downloading file ${fileRef.fileName}:`, err instanceof Error ? err.message : err);
+        }
+      }
+
+      // Reply to feishu confirming file received, but do NOT call agent
+      const replyText = savedFiles.length > 0
+        ? `文件已收到：${savedFiles.join(', ')}。请发送文字指令告诉我如何处理。`
+        : '文件接收失败，请重试。';
+
+      const adapter = this.adapters.get(msg.channelType);
+      if (adapter) {
+        await adapter.sendReply(binding, msg.threadId, replyText, replyContext);
+      }
+      return { text: replyText, sessionId };
     }
 
-    return { text: response.text, sessionId: response.sessionId };
+    // 4. Handle text messages: prepend @合同审核专员 and send to streamChat
+    const { config: appConfig } = await import('../config/index.js');
+    const { createToken } = await import('../middleware/auth.js');
+
+    const token = createToken({
+      userId: systemUserId,
+      email: 'im-internal@system',
+      organizationId: binding.organization_id,
+      role: 'admin',
+    });
+
+    // Look up contract-review agent ID for mention routing
+    let mentionAgentId: string | undefined;
+    try {
+      const { prisma } = await import('../config/database.js');
+      const agent = await prisma.agents.findFirst({
+        where: { name: 'contract-review', organization_id: binding.organization_id },
+        select: { id: true },
+      });
+      mentionAgentId = agent?.id ?? undefined;
+    } catch { /* fallback to orchestrator */ }
+
+    const backendUrl = `http://localhost:${appConfig.port || 3000}`;
+    const streamResp = await fetch(`${backendUrl}/api/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        business_scope_id: binding.business_scope_id,
+        session_id: sessionId,
+        mention_agent_id: mentionAgentId,
+        message: `@合同审核专员 ${msg.text}`,
+      }),
+    });
+
+    // Parse SSE stream to extract the final text response
+    let responseText = '';
+    const allBlocks: Array<{ type: string; text?: string }> = [];
+
+    if (streamResp.ok && streamResp.body) {
+      const reader = streamResp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6);
+          if (data === '[DONE]') continue;
+
+          try {
+            const event = JSON.parse(data);
+            if (event.type === 'assistant' && event.content) {
+              for (const block of event.content) {
+                if (block.type === 'text' && block.text) {
+                  allBlocks.push(block);
+                }
+              }
+            }
+            if (event.type === 'result' && event.result) {
+              responseText = event.result;
+            }
+          } catch { /* skip unparseable events */ }
+        }
+      }
+    }
+
+    if (!responseText && allBlocks.length > 0) {
+      responseText = allBlocks.map(b => b.text || '').join('\n');
+    }
+    if (!responseText) {
+      responseText = '(处理完成，但未生成文本回复)';
+    }
+
+    // Send reply back to feishu
+    const adapter = this.adapters.get(msg.channelType);
+    if (adapter) {
+      await adapter.sendReply(binding, msg.threadId, responseText, replyContext);
+    }
+
+    return { text: responseText, sessionId };
   }
 
   private async resolveSession(

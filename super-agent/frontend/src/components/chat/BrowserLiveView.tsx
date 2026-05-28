@@ -14,7 +14,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { X, Monitor, Loader2, Maximize2, Minimize2, Wifi, WifiOff } from 'lucide-react'
+import { X, Monitor, Loader2, Maximize2, Minimize2, Wifi, WifiOff, RotateCw } from 'lucide-react'
 
 declare global {
   interface Window {
@@ -37,6 +37,7 @@ export function BrowserLiveView({ embedded = false }: BrowserLiveViewProps) {
   const [expanded, setExpanded] = useState(false)
   const [dcvLoaded, setDcvLoaded] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [lastLiveViewUrl, setLastLiveViewUrl] = useState<string | null>(null)
 
   // Drag state
   const [position, setPosition] = useState({ x: window.innerWidth / 2 - 400, y: window.innerHeight / 2 - 250 })
@@ -261,11 +262,18 @@ export function BrowserLiveView({ embedded = false }: BrowserLiveViewProps) {
       console.log('[BrowserLiveView] Live view ready event received, sessionId:', evtSessionId)
       connectedSessionId = evtSessionId
       setSessionId(evtSessionId)
+      setLastLiveViewUrl(liveViewUrl)
       setVisible(true)
       setError(null)
 
       // Disconnect any previous connection (different session)
       disconnectDCV()
+
+      // Force clear DCV DOM element to ensure fresh render
+      const dcvDisplay = document.getElementById('dcv-live-display')
+      if (dcvDisplay) {
+        dcvDisplay.innerHTML = ''
+      }
 
       // Load SDK if not loaded, then connect
       if (!dcvLoaded && !window.dcv) {
@@ -387,6 +395,19 @@ export function BrowserLiveView({ embedded = false }: BrowserLiveViewProps) {
     // Don't disconnect DCV — user might re-open
   }, [])
 
+  // Refresh: disconnect and reconnect to the latest live view URL
+  const handleRefresh = useCallback(() => {
+    if (!lastLiveViewUrl) return
+    console.log('[BrowserLiveView] Manual refresh, reconnecting to:', sessionId)
+    disconnectDCV()
+    // Force clear DCV DOM
+    const dcvDisplay = document.getElementById('dcv-live-display')
+    if (dcvDisplay) dcvDisplay.innerHTML = ''
+    setMode('connecting')
+    setError(null)
+    setTimeout(() => connectToDCV(lastLiveViewUrl), 300)
+  }, [lastLiveViewUrl, sessionId, disconnectDCV, connectToDCV])
+
   const toggleExpanded = useCallback(() => {
     setExpanded(prev => !prev)
     // Re-scale after expand/collapse animation
@@ -422,6 +443,15 @@ export function BrowserLiveView({ embedded = false }: BrowserLiveViewProps) {
             <StatusIcon className={`w-3 h-3 ${mode === 'connecting' ? 'animate-spin' : ''}`} />
             {statusLabel}
           </span>
+          {lastLiveViewUrl && (
+            <button
+              onClick={handleRefresh}
+              className="ml-1 p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+              title="Reconnect live view"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         {/* Error banner */}

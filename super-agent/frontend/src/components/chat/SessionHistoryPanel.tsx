@@ -85,6 +85,43 @@ export function SessionHistoryPanel({
 
   useEffect(() => { void loadSessions() }, [loadSessions, refreshKey])
 
+  // Poll for new generating sessions (e.g. triggered by IM/Feishu).
+  // When a generating session is found that isn't the current one, auto-select it.
+  // When the current session starts generating again (e.g. user replied in Feishu),
+  // auto-reconnect to its stream.
+  useEffect(() => {
+    if (!businessScopeId) return
+    const pollInterval = setInterval(async () => {
+      try {
+        const result = await RestChatService.getSessions(businessScopeId)
+        const generating = result.find(s => s.status === 'generating')
+        if (generating && generating.id !== activeSessionId) {
+          // Found a generating session we're not watching — switch to it
+          onSelectSession(generating.id)
+          // Also refresh the session list UI
+          setSessions(
+            result
+              .map(s => ({
+                id: s.id,
+                title: s.title ?? null,
+                status: s.status ?? 'idle',
+                is_starred: !!(s as any).is_starred,
+                created_at: s.created_at,
+                updated_at: s.updated_at,
+              }))
+              .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+          )
+        } else if (generating && generating.id === activeSessionId && !sessionStreamManager.isSending(activeSessionId)) {
+          // Current session started generating again but we have no active stream — reconnect
+          sessionStreamManager.reconnectStream(activeSessionId)
+        }
+      } catch {
+        // Silently ignore polling errors
+      }
+    }, 5000)
+    return () => clearInterval(pollInterval)
+  }, [businessScopeId, activeSessionId, onSelectSession])
+
   const handleDelete = useCallback(async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation()
     try {

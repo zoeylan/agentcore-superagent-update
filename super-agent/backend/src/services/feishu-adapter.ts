@@ -225,6 +225,79 @@ export class FeishuAdapter implements IMAdapter {
     }
   }
 
+  /**
+   * Send a "thinking" indicator message and return its message_id.
+   * The message will be deleted when the actual reply is sent.
+   */
+  async sendThinkingIndicator(
+    binding: IMChannelBindingEntity,
+    threadId: string,
+    replyContext?: Record<string, unknown>,
+  ): Promise<string | null> {
+    const cfg = binding.config as Record<string, string>;
+    const appId = cfg?.app_id;
+    const appSecret = binding.bot_token_enc;
+    const domain = (cfg?.domain as FeishuDomain) || 'feishu';
+
+    if (!appId || !appSecret) return null;
+
+    const chatId = (replyContext?.feishuChatId as string) || binding.channel_id;
+    const token = await getTenantAccessToken(appId, appSecret, domain);
+    const base = getApiBase(domain);
+
+    try {
+      const resp = await fetch(`${base}/open-apis/im/v1/messages?receive_id_type=chat_id`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receive_id: chatId,
+          msg_type: 'interactive',
+          content: JSON.stringify({
+            elements: [{
+              tag: 'div',
+              text: { tag: 'plain_text', content: '🤔 思考中...' },
+            }],
+          }),
+          ...(threadId ? { root_id: threadId } : {}),
+        }),
+      });
+
+      if (resp.ok) {
+        const result = await resp.json() as { code: number; data?: { message_id?: string } };
+        if (result.code === 0 && result.data?.message_id) {
+          return result.data.message_id;
+        }
+      }
+    } catch (err) {
+      console.warn('[FEISHU] Failed to send thinking indicator:', err instanceof Error ? err.message : err);
+    }
+    return null;
+  }
+
+  /**
+   * Delete a message by its message_id.
+   */
+  private async deleteMessage(
+    appId: string,
+    appSecret: string,
+    domain: FeishuDomain,
+    messageId: string,
+  ): Promise<void> {
+    try {
+      const token = await getTenantAccessToken(appId, appSecret, domain);
+      const base = getApiBase(domain);
+      const resp = await fetch(`${base}/open-apis/im/v1/messages/${messageId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!resp.ok) {
+        console.warn(`[FEISHU] Failed to delete thinking message: ${resp.status}`);
+      }
+    } catch (err) {
+      console.warn('[FEISHU] Error deleting message:', err instanceof Error ? err.message : err);
+    }
+  }
+
   // ── Private: WSClient connection ──
 
   private async connectBot(binding: IMChannelBindingEntity): Promise<void> {
@@ -262,23 +335,96 @@ export class FeishuAdapter implements IMAdapter {
               };
             };
 
-            if (!event.message || event.message.message_type !== 'text') return;
+            // Debug: log all incoming message types
+            console.log(`[FEISHU] Received message_type: ${event.message?.message_type}, content: ${event.message?.content?.substring(0, 200)}`);
+
+            if (!event.message) return;
             if (event.sender?.sender_type === 'bot') return;
 
-            let text: string;
-            try {
-              text = JSON.parse(event.message.content).text;
-            } catch {
+            const messageType = event.message.message_type;
+            let text = '';
+
+            if (messageType === 'text') {
+              // Plain text message
+              try {
+                text = JSON.parse(event.message.content).text;
+              } catch {
+                return;
+              }
+              if (!text?.trim()) return;
+              text = text.trim();
+            } else if (messageType === 'file' || messageType === 'media') {
+              // File or media (video/audio) message — defer download to worker
+              try {
+                const content = JSON.parse(event.message.content);
+                const fileKey = content.file_key;
+                const fileName = content.file_name || `file_${Date.now()}`;
+                if (!fileKey) return;
+
+                text = `请帮我审核这份合同文件：${fileName}`;
+                // Don't download here — pass metadata for lazy download in worker
+                const normalized: NormalizedIMMessage = {
+                  channelType: 'feishu',
+                  channelId: event.message.chat_id,
+                  threadId: event.message.root_id || event.message.message_id,
+                  userId: event.sender?.sender_id?.open_id || 'unknown',
+                  text,
+                  bindingId: bindingId,
+                  isExplicitThread: !!event.message.root_id,
+                  pendingFileDownloads: [{ fileName, messageId: event.message.message_id, fileKey }],
+                };
+
+                await imQueueService.enqueue(normalized, {
+                  feishuChatId: event.message.chat_id,
+                  feishuMessageId: event.message.message_id,
+                });
+                return; // already enqueued, skip the common enqueue below
+              } catch (err) {
+                console.warn('[FEISHU] Failed to process file message:', err);
+                return;
+              }
+            } else if (messageType === 'image') {
+              // Image message — defer download to worker
+              try {
+                const content = JSON.parse(event.message.content);
+                const imageKey = content.image_key;
+                if (!imageKey) return;
+
+                const fileName = `image_${Date.now()}.png`;
+                text = `[用户发送了图片: ${fileName}]`;
+
+                const normalized: NormalizedIMMessage = {
+                  channelType: 'feishu',
+                  channelId: event.message.chat_id,
+                  threadId: event.message.root_id || event.message.message_id,
+                  userId: event.sender?.sender_id?.open_id || 'unknown',
+                  text,
+                  bindingId: bindingId,
+                  isExplicitThread: !!event.message.root_id,
+                  pendingFileDownloads: [{ fileName, messageId: event.message.message_id, fileKey: imageKey }],
+                };
+
+                await imQueueService.enqueue(normalized, {
+                  feishuChatId: event.message.chat_id,
+                  feishuMessageId: event.message.message_id,
+                });
+                return; // already enqueued
+              } catch (err) {
+                console.warn('[FEISHU] Failed to process image message:', err);
+                return;
+              }
+            } else {
+              // Unsupported message type — skip
+              console.log(`[FEISHU] Skipping unsupported message_type: ${messageType}`);
               return;
             }
-            if (!text?.trim()) return;
 
             const normalized: NormalizedIMMessage = {
               channelType: 'feishu',
               channelId: event.message.chat_id,
               threadId: event.message.root_id || event.message.message_id,
               userId: event.sender?.sender_id?.open_id || 'unknown',
-              text: text.trim(),
+              text,
               bindingId: bindingId,
               isExplicitThread: !!event.message.root_id,
             };
@@ -310,6 +456,72 @@ export class FeishuAdapter implements IMAdapter {
     const chunks: string[] = [];
     for (let i = 0; i < text.length; i += maxLen) chunks.push(text.substring(i, i + maxLen));
     return chunks;
+  }
+
+  /**
+   * Download a file/image from Feishu using the message resource API.
+   * Public method called by IM service during worker processing.
+   */
+  async downloadFile(
+    binding: IMChannelBindingEntity,
+    messageId: string,
+    fileKey: string,
+  ): Promise<Buffer | null> {
+    const cfg = binding.config as Record<string, string>;
+    const appId = cfg?.app_id;
+    const appSecret = binding.bot_token_enc;
+    const domain = (cfg?.domain as FeishuDomain) || 'feishu';
+
+    if (!appId || !appSecret) return null;
+
+    const token = await getTenantAccessToken(appId, appSecret, domain);
+    return this.downloadFeishuFile(token, messageId, fileKey, domain);
+  }
+
+  /**
+   * Download a file/image from Feishu using the message resource API.
+   * Returns the file content as a Buffer, or null on failure.
+   */
+  private async downloadFeishuFile(
+    token: string,
+    messageId: string,
+    fileKey: string,
+    domain: FeishuDomain = 'feishu',
+  ): Promise<Buffer | null> {
+    const base = getApiBase(domain);
+    const url = `${base}/open-apis/im/v1/messages/${messageId}/resources/${fileKey}?type=file`;
+
+    console.log(`[FEISHU] Downloading file: messageId=${messageId}, fileKey=${fileKey}`);
+
+    try {
+      const resp = await fetch(url, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => '');
+        console.error(`[FEISHU] File download failed: ${resp.status} ${resp.statusText} - ${body}`);
+        return null;
+      }
+
+      const contentType = resp.headers.get('content-type') || '';
+      console.log(`[FEISHU] File download response: status=${resp.status}, content-type=${contentType}`);
+
+      // If the response is JSON, it's an error response from Feishu
+      if (contentType.includes('application/json')) {
+        const errorBody = await resp.text();
+        console.error(`[FEISHU] File download returned JSON error: ${errorBody}`);
+        return null;
+      }
+
+      const arrayBuffer = await resp.arrayBuffer();
+      console.log(`[FEISHU] File downloaded successfully: ${arrayBuffer.byteLength} bytes`);
+      return Buffer.from(arrayBuffer);
+    } catch (err) {
+      console.error('[FEISHU] File download error:', err instanceof Error ? err.message : err);
+      return null;
+    }
   }
 }
 

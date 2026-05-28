@@ -2130,6 +2130,25 @@ function ChatInterfaceContent() {
               <Trash2 className="w-3.5 h-3.5" />
               <span>{t('chat.clear')}</span>
             </button>
+            <button
+              onClick={async () => {
+                if (!backendSessionId) return
+                try {
+                  const { RestChatService } = await import('@/services/api/restChatService')
+                  const history = await RestChatService.getSessionHistory(backendSessionId)
+                  sessionStreamManager.setMessages(backendSessionId, history)
+                  const reconnected = await sessionStreamManager.reconnectStream(backendSessionId)
+                  if (reconnected) console.log('Manual reconnect successful')
+                } catch (err) {
+                  console.warn('Manual refresh failed:', err)
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-colors"
+              title="Refresh chat"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Refresh</span>
+            </button>
           </div>
         </div>
 

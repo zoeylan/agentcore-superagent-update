@@ -73,6 +73,14 @@ async function handleInvocations(
   if (payload.backend_api_key) {
     process.env.AUTH_TOKEN = payload.backend_api_key;
   }
+  // Expose S3 workspace info so agent Bash scripts can generate presigned URLs
+  if (bucket) {
+    process.env.WORKSPACE_S3_BUCKET = bucket;
+  }
+  if (prefix) {
+    process.env.WORKSPACE_S3_PREFIX = prefix;
+  }
+  process.env.WORKSPACE_S3_REGION = S3_REGION;
 
   // --- SSE streaming response ---
   // S3 sync is now handled by SDK hooks in agent-runner.ts:

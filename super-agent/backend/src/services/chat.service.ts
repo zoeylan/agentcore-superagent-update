@@ -239,6 +239,7 @@ export class ChatService {
     sessionId?: string;
     businessScopeId?: string;
     agentId?: string;
+    mentionAgentId?: string;
     message: string;
     organizationId: string;
     userId: string;
@@ -255,7 +256,7 @@ export class ChatService {
       },
     );
 
-    const { sessionId, agentConfig, skills, claudeSessionId, workspacePath, pluginPaths, mcpServers } = result;
+    const { sessionId, agentConfig, skills, claudeSessionId, workspacePath, pluginPaths, mcpServers, subAgentNameToId, subAgentInfoMap } = result;
 
     // Apply system prompt override if provided (e.g., for Project module)
     if (options.systemPromptOverride) {
@@ -272,12 +273,32 @@ export class ChatService {
     const allContentBlocks: ContentBlock[] = [];
 
     try {
+      // Register stream so WebUI subscribers can receive live events
+      streamRegistry.register(sessionId);
+
+      // Push user message event so WebUI shows it immediately
+      streamRegistry.push(sessionId, {
+        type: 'user_message',
+        message: options.message,
+      } as unknown as ConversationEvent);
+
+      // Build effective message — inject routing hint for @mentioned agent (same as streamChat)
+      let effectiveMessage = options.message;
+      if (options.mentionAgentId && options.businessScopeId) {
+        const mentionedName = [...subAgentNameToId.entries()].find(([, id]) => id === options.mentionAgentId)?.[0];
+        if (mentionedName) {
+          const mentionedInfo = subAgentInfoMap.get(mentionedName);
+          const displayLabel = mentionedInfo?.displayName ?? mentionedName;
+          effectiveMessage = `[System routing: The user has @mentioned agent "${displayLabel}" (name: \`${mentionedName}\`). You MUST delegate this request to the \`${mentionedName}\` subagent using the Task tool. Do NOT answer directly — always delegate.]\n\n${options.message}`;
+        }
+      }
+
       const conversationGenerator = this.agentRuntime.runConversation(
         {
           agentId: agentConfig.id,
           sessionId: options.sessionId,
           providerSessionId: claudeSessionId,
-          message: options.message,
+          message: effectiveMessage,
           organizationId: options.organizationId,
           userId: options.userId,
           workspacePath,
@@ -302,6 +323,8 @@ export class ChatService {
           if (event.type === 'assistant' && event.content) {
             allContentBlocks.push(...event.content);
           }
+          // Push all events to stream registry for WebUI subscribers
+          streamRegistry.push(sessionId, event);
         },
         () => { timedOut = true; },
       );
@@ -310,6 +333,7 @@ export class ChatService {
         throw new Error('Agent response timed out');
       }
     } finally {
+      streamRegistry.complete(sessionId);
       await agentStatusService.setActive(agentConfig.id, options.organizationId);
       await chatSessionRepository.updateStatus(sessionId, options.organizationId, 'idle').catch(() => {});
 
