@@ -1,11 +1,15 @@
+---
+name: docflow-contract-audit
+description: "DocFlow 合同审核 Agent 端到端自动化工作流，包含一审，复审流程。触发词：合同审核、contract audit"
+---
+
 ## 本 Agent 中约定的术语如下表
 
 | 术语 | 说明 | 进一步澄清 |
 |---|---|---|
-| BASE_URL | https://docflow.textin.com/agent-center | DocFlow 平台地址 |
+| BASE_URL | <https://docflow.textin.com/agent-center> | DocFlow 平台地址 |
 | 用户 | 操作 Super Agent 的使用者 | 包括通过任何 channel 连接到 Super Agent 的使用者，包括 Web UI、以及 feishu 等 IM 工具 |
 | case_no | 文档上传到 DocFlow 平台后，会获得的唯一识别码 | 该值会在调用 DocFlow 平台的上传文档 api 后获得，与 api 返回结果中的变量名一致 |
-
 
 ## 首轮审核流程
 
@@ -24,6 +28,19 @@ curl -sI -o /dev/null -w "%{http_code}" -L {BASE_URL}
 ```
 
 如果 BASE_URL 可用，继续执行后续步骤；如果不可用，提示用户后端服务不可用。
+
+使用浏览器登录 BASE_URL 的登录页：
+
+```
+详情页地址: ${BASE_URL}/login?redirect=%2Fagent-center%2Fcontract-audit%2Fcases
+```
+
+在登录页面中，输入用户凭证：
+
+- 用户名或邮箱：superagent
+- 密码：Superagent@2026
+
+点击【登录】按钮，完成登录操作。
 
 ### Step 2: 上传文件创建案件
 
@@ -107,8 +124,6 @@ curl -X POST https://docflow.textin.com/agent-center/api/contract-audit/upload \
    审核要点：
    - ...（总结审核理由摘要）
    ```
-   
-   
 
 ## 复审流程
 
@@ -135,6 +150,13 @@ curl -sI -o /dev/null -w "%{http_code}" -L {BASE_URL}
 ```
 ${BASE_URL}/contract-audit/cases/${case_no}
 ```
+
+如果进入到登录页面，输入以下凭证，然后点击【登录】按钮：
+
+- 用户名或邮箱：superagent
+- 密码：Superagent@2026
+
+确认进入到案件详情页，继续执行后续操作。
 
 ### Step 2: Agent 助手追加文件并重跑任务
 
@@ -224,4 +246,3 @@ ${BASE_URL}/contract-audit/cases/${case_no}
 3. 页面最下方找到审批操作区域
 4. 根据审核结果（通过）填写审批意见
 5. 点击「同意」按钮完成 OA 审批
-
